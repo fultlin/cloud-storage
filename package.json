@@ -1,0 +1,20 @@
+{
+  "name": "cloud-storage",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "pnpm --filter @app/shared build && pnpm -r --parallel run dev",
+    "lint": "oxlint --deny-warnings apps packages",
+    "typecheck": "pnpm --filter @app/shared build && pnpm -r run typecheck",
+    "test": "pnpm -r run test"
+  },
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24.14.0 <25"
+  },
+  "devDependencies": {
+    "typescript": "6.0.2",
+    "oxlint": "^1.81.0"
+  }
+}

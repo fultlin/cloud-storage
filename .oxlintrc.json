@@ -1,0 +1,10 @@
+{
+  "plugins": ["typescript", "import", "react"],
+  "ignorePatterns": ["**/dist/**", "**/node_modules/**"],
+  "overrides": [
+    {
+      "files": ["apps/web/src/**/*.{ts,tsx}"],
+      "env": { "browser": true }
+    }
+  ]
+}
