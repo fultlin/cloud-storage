@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { envSchema } from './config/env.schema.js';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { PrismaModule } from './prisma/prisma.module.js';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { AppService } from './app.service.js';
       validationSchema: envSchema,
       skipProcessEnv: true,
     }),
+    PrismaModule,
   ],
   controllers: [AppController],
   providers: [AppService],

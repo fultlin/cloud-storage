@@ -1,6 +1,6 @@
 {
   "plugins": ["typescript", "import", "react"],
-  "ignorePatterns": ["**/dist/**", "**/node_modules/**"],
+  "ignorePatterns": ["**/dist/**", "**/node_modules/**", "apps/api/src/generated/**"],
   "overrides": [
     {
       "files": ["apps/web/src/**/*.{ts,tsx}"],
