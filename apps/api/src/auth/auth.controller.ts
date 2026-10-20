@@ -1,0 +1,24 @@
+import { credentialsSchema, type Credentials } from '@app/shared';
+import { Body, Controller, Post, Req } from '@nestjs/common';
+import type { Request } from 'express';
+import { SessionsService } from '../sessions/sessions.service.js';
+import { UsersService } from '../users/users.service.js';
+
+@Controller('auth')
+export class AuthController {
+  constructor(
+    private readonly users: UsersService,
+    private readonly sessions: SessionsService,
+  ) {}
+
+  @Post('sign-up')
+  async signUp(
+    @Body({ schema: credentialsSchema }) credentials: Credentials,
+    @Req() req: Request,
+  ): Promise<{ username: string }> {
+    const user = await this.users.create(credentials.username, credentials.password);
+    await this.sessions.start(req, user.id);
+    // Контракт регистрации не раскрывает ни внутренний id, ни хеш пароля.
+    return { username: user.username };
+  }
+}

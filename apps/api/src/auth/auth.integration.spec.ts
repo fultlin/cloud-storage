@@ -1,0 +1,190 @@
+import { ConfigModule } from '@nestjs/config';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { Test } from '@nestjs/testing';
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { verify } from 'argon2';
+import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { parseEnv, promisify } from 'node:util';
+import { createClient, type RedisClientType } from 'redis';
+import request from 'supertest';
+import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
+import { configureApp } from '../configure-app.js';
+import { envSchema } from '../config/env.schema.js';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { UsersService } from '../users/users.service.js';
+import { AuthModule } from './auth.module.js';
+
+const execFileAsync = promisify(execFile);
+const example = parseEnv(readFileSync(new URL('../../../../.env.example', import.meta.url), 'utf8'));
+const route = '/api/auth/sign-up';
+const credentials = { username: 'user_1', password: 'valid-password' };
+
+describe('POST /api/auth/sign-up', () => {
+  let postgres: StartedPostgreSqlContainer | undefined;
+  let redis: StartedTestContainer | undefined;
+  let observer: RedisClientType;
+  let app: NestExpressApplication | undefined;
+  let prisma: PrismaService;
+  let users: UsersService;
+
+  function http() {
+    if (!app) throw new Error('Test application is not initialized');
+    return request(app.getHttpServer());
+  }
+
+  function cookieFrom(response: { headers: Record<string, unknown> }): string {
+    const cookies = response.headers['set-cookie'];
+    if (!Array.isArray(cookies) || typeof cookies[0] !== 'string') {
+      throw new Error('Session cookie was not set');
+    }
+    return cookies[0].split(';')[0];
+  }
+
+  beforeAll(async () => {
+    postgres = await new PostgreSqlContainer('postgres:18.0-alpine').start();
+    redis = await new GenericContainer('redis:8.2.2-alpine')
+      .withExposedPorts(6379)
+      .withWaitStrategy(Wait.forLogMessage('Ready to accept connections'))
+      .start();
+    const databaseUrl = postgres.getConnectionUri();
+    const redisUrl = `redis://${redis.getHost()}:${redis.getMappedPort(6379)}`;
+    await execFileAsync(process.execPath, [
+      fileURLToPath(new URL('../../node_modules/prisma/build/index.js', import.meta.url)),
+      'migrate', 'deploy', '--config', 'prisma.config.ts',
+    ], {
+      cwd: fileURLToPath(new URL('../../', import.meta.url)),
+      env: { ...process.env, DATABASE_URL: databaseUrl },
+      timeout: 60_000,
+    });
+
+    const config = envSchema.parse({ ...example, DATABASE_URL: databaseUrl, REDIS_URL: redisUrl });
+    const moduleFixture = await Test.createTestingModule({
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          ignoreEnvFile: true,
+          ignoreEnvVars: true,
+          skipProcessEnv: true,
+          load: [() => config],
+        }),
+        AuthModule,
+      ],
+    }).compile();
+    app = moduleFixture.createNestApplication<NestExpressApplication>({ logger: false });
+    configureApp(app);
+    await app.init();
+    prisma = app.get(PrismaService);
+    users = app.get(UsersService);
+    observer = createClient({ url: redisUrl });
+    observer.on('error', (error: Error) => { throw error; });
+    await observer.connect();
+  }, 120_000);
+
+  beforeEach(async () => {
+    // Очистка ограничена временными контейнерами этого тестового файла.
+    await Promise.all([prisma.user.deleteMany(), observer.flushDb()]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  afterAll(async () => {
+    try {
+      await app?.close();
+      if (observer?.isOpen) await observer.close();
+    } finally {
+      await Promise.all([postgres?.stop(), redis?.stop()]);
+    }
+  }, 30_000);
+
+  it('returns 201, stores a hash, and creates a session with the new user id', async () => {
+    const response = await http().post(route).send(credentials).expect(201, { username: 'user_1' });
+    const cookie = cookieFrom(response);
+    expect(cookie).toMatch(/^sid=/);
+    expect(response.headers['set-cookie'][0]).toContain('HttpOnly');
+    expect(response.headers['set-cookie'][0]).toContain('SameSite=Lax');
+    const user = await prisma.user.findUniqueOrThrow({ where: { username: 'user_1' } });
+    expect(await verify(user.passwordHash, credentials.password)).toBe(true);
+    const [key] = await observer.keys('sess:*');
+    expect(await observer.dbSize()).toBe(1);
+    expect(JSON.parse((await observer.get(key)) ?? '{}')).toMatchObject({ userId: user.id });
+    expect(await observer.ttl(key)).toBeGreaterThan(0);
+  });
+
+  it.each([
+    {},
+    { username: 'ab', password: 'valid-password' },
+    { username: 'User_1', password: 'valid-password' },
+    { username: 'user_1', password: 'short' },
+    { username: 'user_1', password: 'a'.repeat(65) },
+    { username: 123, password: 'valid-password' },
+    { username: 'user_1', password: 12345678 },
+  ])('returns 400 for invalid input without creating an account or session', async body => {
+    const response = await http().post(route).send(body).expect(400);
+    expect(response.body).toMatchObject({ statusCode: 400, error: 'Bad Request' });
+    expect(typeof response.body.message === 'string' || Array.isArray(response.body.message)).toBe(true);
+    expect(response.headers['set-cookie']).toBeUndefined();
+    expect(await prisma.user.count()).toBe(0);
+    expect(await observer.dbSize()).toBe(0);
+  });
+
+  it('returns 409 for an existing username without replacing its password', async () => {
+    await http().post(route).send(credentials).expect(201);
+    const response = await http().post(route)
+      .send({ ...credentials, password: 'another-password' }).expect(409);
+    expect(response.body).toEqual({
+      statusCode: 409, error: 'Conflict', message: 'Username is already taken',
+    });
+    expect(response.headers['set-cookie']).toBeUndefined();
+    expect(await prisma.user.count()).toBe(1);
+    expect(await users.verifyCredentials(credentials.username, credentials.password)).not.toBeNull();
+    expect(await observer.dbSize()).toBe(1);
+  });
+
+  it('replaces an existing session id when registering another account', async () => {
+    const firstCookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+    const [oldKey] = await observer.keys('sess:*');
+    const response = await http().post(route).set('Cookie', firstCookie)
+      .send({ username: 'second_user', password: 'valid-password' }).expect(201);
+    expect(cookieFrom(response)).not.toBe(firstCookie);
+    expect(await observer.exists(oldKey)).toBe(0);
+    const second = await prisma.user.findUniqueOrThrow({ where: { username: 'second_user' } });
+    const [newKey] = await observer.keys('sess:*');
+    expect(JSON.parse((await observer.get(newKey)) ?? '{}')).toMatchObject({ userId: second.id });
+    expect(await observer.dbSize()).toBe(1);
+  });
+
+  it('ignores a userId supplied in the request body', async () => {
+    await http().post(route).send({ ...credentials, userId: 999999 }).expect(201);
+    const user = await prisma.user.findUniqueOrThrow({ where: { username: 'user_1' } });
+    const [key] = await observer.keys('sess:*');
+    expect(JSON.parse((await observer.get(key)) ?? '{}')).toMatchObject({ userId: user.id });
+  });
+
+  it('returns 500 without leaking implementation details on an unexpected error', async () => {
+    vi.spyOn(users, 'create').mockRejectedValueOnce(new Error('sensitive-database-detail'));
+    const response = await http().post(route).send(credentials).expect(500);
+    expect(response.body).toEqual({ statusCode: 500, message: 'Internal server error' });
+    expect(response.text).not.toContain('sensitive-database-detail');
+    expect(response.headers['set-cookie']).toBeUndefined();
+    expect(await observer.dbSize()).toBe(0);
+  });
+
+  it('does not report success or leave a session when Redis refuses the save', async () => {
+    // Меняем ACL только в отдельном Redis этого тестового файла.
+    await observer.sendCommand(['ACL', 'SETUSER', 'default', '-set']);
+    try {
+      const response = await http().post(route).send(credentials).expect(500);
+      expect(response.body).toEqual({ statusCode: 500, message: 'Internal server error' });
+      expect(response.headers['set-cookie']).toBeUndefined();
+      expect(await observer.dbSize()).toBe(0);
+      // Создание аккаунта в PostgreSQL и сохранение сессии Redis не атомарны.
+      expect(await prisma.user.count()).toBe(1);
+    } finally {
+      await observer.sendCommand(['ACL', 'SETUSER', 'default', '+set']);
+    }
+  });
+});

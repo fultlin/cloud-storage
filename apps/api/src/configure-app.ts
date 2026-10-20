@@ -1,3 +1,4 @@
+import { StandardSchemaValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { Env } from './config/env.schema.js';
@@ -8,5 +9,6 @@ export function configureApp(app: NestExpressApplication): void {
   const config = app.get<ConfigService<Env, true>>(ConfigService);
   app.set('trust proxy', config.get('TRUST_PROXY', { infer: true }) ? 1 : false);
   app.setGlobalPrefix('api');
+  app.useGlobalPipes(new StandardSchemaValidationPipe());
   app.use(app.get(SessionsService).middleware);
 }

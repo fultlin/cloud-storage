@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { envSchema } from './config/env.schema.js';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
-import { UsersModule } from './users/users.module.js';
+import { AuthModule } from './auth/auth.module.js';
 import { SessionsModule } from './sessions/sessions.module.js';
 
 @Module({
@@ -16,7 +16,7 @@ import { SessionsModule } from './sessions/sessions.module.js';
       validationSchema: envSchema,
       skipProcessEnv: true,
     }),
-    UsersModule,
+    AuthModule,
     SessionsModule,
   ],
   controllers: [AppController],

@@ -1,7 +1,7 @@
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisStore } from 'connect-redis';
-import type { RequestHandler } from 'express';
+import type { Request, RequestHandler } from 'express';
 import session from 'express-session';
 import { createClient, type RedisClientType } from 'redis';
 import type { Env } from '../config/env.schema.js';
@@ -48,6 +48,29 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit(): Promise<void> {
     // Nest завершает инициализацию модулей до начала приёма HTTP-запросов.
     await this.client.connect();
+  }
+
+  async start(req: Request, userId: number): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      req.session.regenerate(error => error ? reject(error) : resolve());
+    });
+
+    // regenerate заменяет req.session: нельзя продолжать работу со старым объектом.
+    req.session.userId = userId;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        req.session.save(error => error ? reject(error) : resolve());
+      });
+    } catch (error: unknown) {
+      // Не оставляем авторизованную сессию после неуспешного сохранения.
+      await new Promise<void>(resolve => {
+        req.session.destroy((cleanupError: Error | null) => {
+          if (cleanupError) this.logger.error('Failed to clean up session', cleanupError.stack);
+          resolve();
+        });
+      });
+      throw error;
+    }
   }
 
   async onModuleDestroy(): Promise<void> {
