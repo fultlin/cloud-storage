@@ -5,6 +5,7 @@ import { envSchema } from './config/env.schema.js';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { UsersModule } from './users/users.module.js';
+import { SessionsModule } from './sessions/sessions.module.js';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { UsersModule } from './users/users.module.js';
       skipProcessEnv: true,
     }),
     UsersModule,
+    SessionsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -29,8 +29,11 @@
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
     "argon2": "^0.45.1",
+    "connect-redis": "^10.0.0",
     "dotenv": "^18.0.8",
+    "express-session": "^1.19.0",
     "pg": "^8.23.1",
+    "redis": "^6.3.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "zod": "^4.6.7"
@@ -41,11 +44,13 @@
     "@nestjs/testing": "^12.0.1",
     "@testcontainers/postgresql": "^12.2.1",
     "@types/express": "^5.0.0",
+    "@types/express-session": "^1.19.0",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.23.1",
     "@types/supertest": "^7.0.0",
     "prisma": "^7.10.1",
     "supertest": "^7.0.0",
+    "testcontainers": "^12.2.1",
     "vite": "^8.0.0",
     "vitest": "^4.1.2"
   }

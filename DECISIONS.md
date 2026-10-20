@@ -1,5 +1,25 @@
 # Архитектурные решения
 
+## 008. Сессии Redis и единая настройка HTTP
+
+Решение: SessionsService создаёт Redis-клиент и middleware express-session.
+Соединение открывается в onModuleInit до приёма HTTP-запросов, закрывается
+при остановке Nest. Повторные попытки подключения ограничены, очередь команд
+при отключённом Redis запрещена. Middleware подключается через app.use.
+configureApp используется в main и тестах с одинаковым префиксом /api и trust proxy.
+
+Альтернатива: MemoryStore или отдельная настройка middleware в каждом тесте.
+
+Причина: сессии переживают перезапуск API; конфигурация тестов соответствует запуску.
+Cookie sid подписана, HttpOnly, SameSite=Lax, Secure из env. В Redis сохраняется userId
+и служебная информация cookie. saveUninitialized=false не создаёт анонимные сессии,
+resave=false избегает лишних записей. rolling=true обновляет cookie при активности,
+согласованно с продлением TTL в connect-redis. Срок берётся из SESSION_TTL_SECONDS;
+cookie использует миллисекунды, Redis — секунды.
+TRUST_PROXY=true доверяет одному ближайшему прокси; false отключает доверие.
+
+Основание: разделы 4, 8.3 и 10.2 ТЗ.
+
 ## 007. Общий контракт регистрации и входа
 
 Решение: packages/shared экспортирует Zod-схемы username, password и credentials,
