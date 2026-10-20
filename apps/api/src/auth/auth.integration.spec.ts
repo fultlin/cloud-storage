@@ -21,7 +21,7 @@ const example = parseEnv(readFileSync(new URL('../../../../.env.example', import
 const route = '/api/auth/sign-up';
 const credentials = { username: 'user_1', password: 'valid-password' };
 
-describe('POST /api/auth/sign-up', () => {
+describe('Auth HTTP API', () => {
   let postgres: StartedPostgreSqlContainer | undefined;
   let redis: StartedTestContainer | undefined;
   let observer: RedisClientType;
@@ -186,5 +186,105 @@ describe('POST /api/auth/sign-up', () => {
     } finally {
       await observer.sendCommand(['ACL', 'SETUSER', 'default', '+set']);
     }
+  });
+
+  describe('POST /api/auth/sign-in', () => {
+    const signInRoute = '/api/auth/sign-in';
+
+    it('returns 200 and saves the existing user id in a new session', async () => {
+      const user = await users.create(credentials.username, credentials.password);
+      const response = await http().post(signInRoute).send(credentials)
+        .expect(200, { username: credentials.username });
+      expect(cookieFrom(response)).toMatch(/^sid=/);
+      expect(response.headers['set-cookie'][0]).toContain('HttpOnly');
+      expect(response.headers['set-cookie'][0]).toContain('SameSite=Lax');
+      const [key] = await observer.keys('sess:*');
+      expect(JSON.parse((await observer.get(key)) ?? '{}')).toMatchObject({ userId: user.id });
+      expect(await observer.ttl(key)).toBeGreaterThan(0);
+      expect(await prisma.user.count()).toBe(1);
+    });
+
+    it.each([
+      {},
+      { username: 'ab', password: 'valid-password' },
+      { username: 'User_1', password: 'valid-password' },
+      { username: 'user_1', password: 'short' },
+      { username: 'user_1', password: 'a'.repeat(65) },
+      { username: 'user_1', password: 12345678 },
+    ])('returns 400 for invalid input without creating users or sessions', async body => {
+      const response = await http().post(signInRoute).send(body).expect(400);
+      expect(response.body).toMatchObject({ statusCode: 400, error: 'Bad Request' });
+      expect(response.headers['set-cookie']).toBeUndefined();
+      expect(await observer.dbSize()).toBe(0);
+      expect(await prisma.user.count()).toBe(0);
+    });
+
+    it('returns exactly the same 401 for an unknown username and wrong password', async () => {
+      await users.create(credentials.username, credentials.password);
+      const wrongPassword = await http().post(signInRoute)
+        .send({ ...credentials, password: 'wrong-password' }).expect(401);
+      const unknownUser = await http().post(signInRoute)
+        .send({ ...credentials, username: 'unknown_user' }).expect(401);
+      expect(wrongPassword.body).toEqual({
+        statusCode: 401, error: 'Unauthorized', message: 'Invalid username or password',
+      });
+      expect(unknownUser.body).toEqual(wrongPassword.body);
+      expect(wrongPassword.headers['set-cookie']).toBeUndefined();
+      expect(unknownUser.headers['set-cookie']).toBeUndefined();
+      expect(await observer.dbSize()).toBe(0);
+      expect(await prisma.user.count()).toBe(1);
+    });
+
+    it('replaces the session id and removes the previous session on repeated sign-in', async () => {
+      await users.create(credentials.username, credentials.password);
+      const firstCookie = cookieFrom(await http().post(signInRoute).send(credentials).expect(200));
+      const [oldKey] = await observer.keys('sess:*');
+      const response = await http().post(signInRoute).set('Cookie', firstCookie)
+        .send(credentials).expect(200);
+      expect(cookieFrom(response)).not.toBe(firstCookie);
+      expect(await observer.exists(oldKey)).toBe(0);
+      expect(await observer.dbSize()).toBe(1);
+    });
+
+    it('does not change the password or replace an existing session after failed sign-in', async () => {
+      const firstCookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      const [key] = await observer.keys('sess:*');
+      await http().post(signInRoute).set('Cookie', firstCookie)
+        .send({ ...credentials, password: 'wrong-password' }).expect(401);
+      expect(await observer.exists(key)).toBe(1);
+      expect(await observer.dbSize()).toBe(1);
+      expect(await users.verifyCredentials(credentials.username, credentials.password)).not.toBeNull();
+    });
+
+    it('does not trim the password and takes userId only from the verified account', async () => {
+      const password = '  password  ';
+      const user = await users.create(credentials.username, password);
+      await http().post(signInRoute).send({ ...credentials, password: 'password' }).expect(401);
+      await http().post(signInRoute).send({ ...credentials, password, userId: 999999 }).expect(200);
+      const [key] = await observer.keys('sess:*');
+      expect(JSON.parse((await observer.get(key)) ?? '{}')).toMatchObject({ userId: user.id });
+    });
+
+    it('returns a standard 500 without leaking unexpected verification failures', async () => {
+      vi.spyOn(users, 'verifyCredentials').mockRejectedValueOnce(new Error('sensitive-driver-detail'));
+      const response = await http().post(signInRoute).send(credentials).expect(500);
+      expect(response.body).toEqual({ statusCode: 500, message: 'Internal server error' });
+      expect(response.headers['set-cookie']).toBeUndefined();
+      expect(await observer.dbSize()).toBe(0);
+    });
+
+    it('returns 500 without a cookie if Redis refuses to save the session', async () => {
+      await users.create(credentials.username, credentials.password);
+      await observer.sendCommand(['ACL', 'SETUSER', 'default', '-set']);
+      try {
+        const response = await http().post(signInRoute).send(credentials).expect(500);
+        expect(response.body).toEqual({ statusCode: 500, message: 'Internal server error' });
+        expect(response.headers['set-cookie']).toBeUndefined();
+        expect(await observer.dbSize()).toBe(0);
+        expect(await prisma.user.count()).toBe(1);
+      } finally {
+        await observer.sendCommand(['ACL', 'SETUSER', 'default', '+set']);
+      }
+    });
   });
 });
