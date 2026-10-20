@@ -1,3 +1,3 @@
-// Публичные схемы и типы добавим здесь в блоке валидации.
-// Пока пустой экспорт позволяет проверить сборку ESM-пакета.
-export {};
+// Публичные схемы и типы общего пакета.
+export { usernameSchema, passwordSchema, credentialsSchema } from './auth.js';
+export type { Credentials } from './auth.js';
