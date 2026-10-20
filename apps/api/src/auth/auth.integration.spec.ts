@@ -379,4 +379,88 @@ describe('Auth HTTP API', () => {
       await http().get('/api/__protected_probe').set('Cookie', cookie).expect(200, { protected: true });
     });
   });
+
+  describe('POST /api/auth/sign-out', () => {
+    const signOutRoute = '/api/auth/sign-out';
+
+    it('returns empty 204, expires sid, and invalidates the old cookie', async () => {
+      const cookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      const [key] = await observer.keys('sess:*');
+      const response = await http().post(signOutRoute).set('Cookie', cookie).expect(204);
+      expect(response.text).toBe('');
+      expect(response.headers['content-type']).toBeUndefined();
+      const clearedCookie = response.headers['set-cookie'][0];
+      expect(clearedCookie).toMatch(/^sid=;/);
+      expect(clearedCookie).toContain('Path=/');
+      expect(clearedCookie).toContain('Expires=Thu, 01 Jan 1970 00:00:00 GMT');
+      expect(clearedCookie).toContain('HttpOnly');
+      expect(clearedCookie).toContain('SameSite=Lax');
+      expect(await observer.exists(key)).toBe(0);
+      await http().get('/api/user/me').set('Cookie', cookie).expect(401);
+      expect(await prisma.user.count()).toBe(1);
+    });
+
+    it('returns 401 without a session and does not clear unrelated cookies', async () => {
+      const response = await http().post(signOutRoute).expect(401);
+      expect(response.body).toEqual({ statusCode: 401, error: 'Unauthorized', message: 'Unauthorized' });
+      expect(response.headers['set-cookie']).toBeUndefined();
+      expect(await observer.dbSize()).toBe(0);
+    });
+
+    it('returns 401 if the session has already been destroyed', async () => {
+      const cookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      await http().post(signOutRoute).set('Cookie', cookie).expect(204);
+      await http().post(signOutRoute).set('Cookie', cookie).expect(401);
+    });
+
+    it('returns 401 for a forged cookie', async () => {
+      const response = await http().post(signOutRoute).set('Cookie', 'sid=forged').expect(401);
+      expect(response.headers['set-cookie']).toBeUndefined();
+    });
+
+    it('ends only the current session, preserving other sessions and the account', async () => {
+      const firstCookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      const secondCookie = cookieFrom(await http().post('/api/auth/sign-in').send(credentials).expect(200));
+      expect(await observer.dbSize()).toBe(2);
+      await http().post(signOutRoute).set('Cookie', firstCookie).expect(204);
+      await http().get('/api/user/me').set('Cookie', firstCookie).expect(401);
+      await http().get('/api/user/me').set('Cookie', secondCookie)
+        .expect(200, { username: credentials.username });
+      expect(await observer.dbSize()).toBe(1);
+      expect(await prisma.user.count()).toBe(1);
+    });
+
+    it('cannot sign out another user through request parameters', async () => {
+      const firstCookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      const secondCookie = cookieFrom(await http().post(route)
+        .send({ ...credentials, username: 'second_user' }).expect(201));
+      const second = await prisma.user.findUniqueOrThrow({ where: { username: 'second_user' } });
+      await http().post(signOutRoute).set('Cookie', firstCookie)
+        .query({ userId: second.id }).send({ userId: second.id }).expect(204);
+      await http().get('/api/user/me').set('Cookie', secondCookie).expect(200, { username: 'second_user' });
+    });
+
+    it('allows a fresh sign-in after sign-out', async () => {
+      const oldCookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      await http().post(signOutRoute).set('Cookie', oldCookie).expect(204);
+      const newCookie = cookieFrom(await http().post('/api/auth/sign-in').send(credentials).expect(200));
+      expect(newCookie).not.toBe(oldCookie);
+      await http().get('/api/user/me').set('Cookie', newCookie).expect(200, { username: credentials.username });
+    });
+
+    it('returns 500 without clearing the cookie when Redis refuses deletion', async () => {
+      const cookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      await observer.sendCommand(['ACL', 'SETUSER', 'default', '-del']);
+      try {
+        const response = await http().post(signOutRoute).set('Cookie', cookie).expect(500);
+        expect(response.body).toEqual({ statusCode: 500, message: 'Internal server error' });
+        expect(response.headers['set-cookie']).toBeUndefined();
+        expect(await observer.dbSize()).toBe(1);
+      } finally {
+        await observer.sendCommand(['ACL', 'SETUSER', 'default', '+del']);
+      }
+      await http().get('/api/user/me').set('Cookie', cookie).expect(200, { username: credentials.username });
+      await http().post(signOutRoute).set('Cookie', cookie).expect(204);
+    });
+  });
 });

@@ -1,6 +1,6 @@
 import { credentialsSchema, type Credentials } from '@app/shared';
-import { Body, Controller, HttpCode, Post, Req, UnauthorizedException } from '@nestjs/common';
-import type { Request } from 'express';
+import { Body, Controller, HttpCode, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { SessionsService } from '../sessions/sessions.service.js';
 import { UsersService } from '../users/users.service.js';
 import { Public } from './public.decorator.js';
@@ -38,5 +38,14 @@ export class AuthController {
     }
     await this.sessions.start(req, user.id);
     return { username: user.username };
+  }
+
+  @Post('sign-out')
+  @HttpCode(204)
+  async signOut(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    await this.sessions.end(req, res);
   }
 }

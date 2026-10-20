@@ -1,7 +1,7 @@
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisStore } from 'connect-redis';
-import type { Request, RequestHandler } from 'express';
+import type { CookieOptions, Request, RequestHandler, Response } from 'express';
 import session from 'express-session';
 import { createClient, type RedisClientType } from 'redis';
 import type { Env } from '../config/env.schema.js';
@@ -10,6 +10,7 @@ import type { Env } from '../config/env.schema.js';
 export class SessionsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SessionsService.name);
   private readonly client: RedisClientType;
+  private readonly cookieOptions: CookieOptions;
   readonly middleware: RequestHandler;
 
   constructor(config: ConfigService<Env, true>) {
@@ -27,6 +28,12 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     this.client.on('error', (error: Error) => this.logger.error('Redis connection error', error.stack));
 
     const ttlSeconds = config.get('SESSION_TTL_SECONDS', { infer: true });
+    this.cookieOptions = {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: config.get('COOKIE_SECURE', { infer: true }),
+    };
     this.middleware = session({
       store: new RedisStore({ client: this.client, prefix: 'sess:', ttl: ttlSeconds }),
       name: 'sid',
@@ -36,10 +43,7 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
       // Продлеваем cookie вместе с TTL активной сессии в Redis.
       rolling: true,
       cookie: {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'lax',
-        secure: config.get('COOKIE_SECURE', { infer: true }),
+        ...this.cookieOptions,
         maxAge: ttlSeconds * 1000,
       },
     });
@@ -77,5 +81,13 @@ export class SessionsService implements OnModuleInit, OnModuleDestroy {
     if (this.client.isOpen) {
       await this.client.close();
     }
+  }
+
+  async end(req: Request, res: Response): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      req.session.destroy(error => error ? reject(error) : resolve());
+    });
+    // Одинаковые атрибуты cookie при установке и удалении, без maxAge.
+    res.clearCookie('sid', this.cookieOptions);
   }
 }
