@@ -3,4 +3,8 @@ packages:
   - packages/*
 allowBuilds:
   '@prisma/engines': true
+  argon2: true
+  cpu-features: false
   prisma: true
+  protobufjs: true
+  ssh2: false
