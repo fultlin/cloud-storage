@@ -3,6 +3,7 @@ import { Body, Controller, HttpCode, Post, Req, UnauthorizedException } from '@n
 import type { Request } from 'express';
 import { SessionsService } from '../sessions/sessions.service.js';
 import { UsersService } from '../users/users.service.js';
+import { Public } from './public.decorator.js';
 
 @Controller('auth')
 export class AuthController {
@@ -12,6 +13,7 @@ export class AuthController {
   ) {}
 
   @Post('sign-up')
+  @Public()
   async signUp(
     @Body({ schema: credentialsSchema }) credentials: Credentials,
     @Req() req: Request,
@@ -23,6 +25,7 @@ export class AuthController {
   }
 
   @Post('sign-in')
+  @Public()
   @HttpCode(200)
   async signIn(
     @Body({ schema: credentialsSchema }) credentials: Credentials,

@@ -10,6 +10,13 @@ export type AuthenticatedUser = Pick<User, 'id' | 'username'>;
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async findById(id: number): Promise<AuthenticatedUser | null> {
+    return this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, username: true },
+    });
+  }
+
   async create(username: string, password: string): Promise<AuthenticatedUser> {
     // Argon2 сам создаёт случайную соль и включает её в строку хеша.
     const passwordHash = await hash(password, {

@@ -17,11 +17,11 @@ describe('AppController (e2e)', () => {
     await app.init();
   });
 
-  it('/api (GET)', () => {
+  it('protects /api by default without a session', () => {
     return request(app.getHttpServer())
       .get('/api')
-      .expect(200)
-      .expect('Hello World!');
+      .expect(401)
+      .expect({ statusCode: 401, error: 'Unauthorized', message: 'Unauthorized' });
   });
 
   afterEach(async () => {

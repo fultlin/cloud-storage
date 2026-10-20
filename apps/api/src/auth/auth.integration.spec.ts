@@ -1,4 +1,5 @@
 import { ConfigModule } from '@nestjs/config';
+import { Controller, Get } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -20,6 +21,15 @@ const execFileAsync = promisify(execFile);
 const example = parseEnv(readFileSync(new URL('../../../../.env.example', import.meta.url), 'utf8'));
 const route = '/api/auth/sign-up';
 const credentials = { username: 'user_1', password: 'valid-password' };
+
+// Намеренно без @Public и без локального @UseGuards: проверяем глобальную защиту.
+@Controller('__protected_probe')
+class ProtectedProbeController {
+  @Get()
+  read() {
+    return { protected: true };
+  }
+}
 
 describe('Auth HTTP API', () => {
   let postgres: StartedPostgreSqlContainer | undefined;
@@ -71,6 +81,7 @@ describe('Auth HTTP API', () => {
         }),
         AuthModule,
       ],
+      controllers: [ProtectedProbeController],
     }).compile();
     app = moduleFixture.createNestApplication<NestExpressApplication>({ logger: false });
     configureApp(app);
@@ -285,6 +296,87 @@ describe('Auth HTTP API', () => {
       } finally {
         await observer.sendCommand(['ACL', 'SETUSER', 'default', '+set']);
       }
+    });
+  });
+
+  describe('GET /api/user/me', () => {
+    const meRoute = '/api/user/me';
+
+    it('returns 401 without a session before executing the controller', async () => {
+      const lookup = vi.spyOn(users, 'findById');
+      const response = await http().get(meRoute).expect(401);
+      expect(response.body).toEqual({ statusCode: 401, error: 'Unauthorized', message: 'Unauthorized' });
+      expect(response.headers['set-cookie']).toBeUndefined();
+      expect(lookup).not.toHaveBeenCalled();
+    });
+
+    it('returns only username after registration and after sign-in', async () => {
+      const registrationCookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      await http().get(meRoute).set('Cookie', registrationCookie)
+        .expect(200, { username: credentials.username });
+      const loginCookie = cookieFrom(await http().post('/api/auth/sign-in').send(credentials).expect(200));
+      await http().get(meRoute).set('Cookie', loginCookie)
+        .expect(200, { username: credentials.username });
+    });
+
+    it('cannot select another user through a query parameter or header', async () => {
+      const firstCookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      const secondCookie = cookieFrom(await http().post(route)
+        .send({ ...credentials, username: 'second_user' }).expect(201));
+      const second = await prisma.user.findUniqueOrThrow({ where: { username: 'second_user' } });
+      await http().get(meRoute).query({ userId: second.id }).set('X-User-Id', String(second.id))
+        .set('Cookie', firstCookie).expect(200, { username: credentials.username });
+      await http().get(meRoute).set('Cookie', secondCookie).expect(200, { username: 'second_user' });
+      await http().get(meRoute).query({ userId: second.id }).expect(401);
+    });
+
+    it('rejects a modified session signature', async () => {
+      const cookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      const modified = cookie.slice(0, -1) + (cookie.endsWith('A') ? 'B' : 'A');
+      await http().get(meRoute).set('Cookie', modified).expect(401);
+    });
+
+    it.each([0, -1, 1.5, '42', null])('rejects an invalid userId in a stored session', async userId => {
+      const cookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      const [key] = await observer.keys('sess:*');
+      const session = JSON.parse((await observer.get(key)) ?? '{}') as Record<string, unknown>;
+      session.userId = userId;
+      await observer.set(key, JSON.stringify(session), { EX: 60 });
+      await http().get(meRoute).set('Cookie', cookie).expect(401);
+    });
+
+    it('returns 401 if the session exists but the database user no longer exists', async () => {
+      const cookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      await prisma.user.deleteMany();
+      await http().get(meRoute).set('Cookie', cookie).expect(401);
+    });
+
+    it('returns 401 when Redis no longer contains the session', async () => {
+      const cookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      const [key] = await observer.keys('sess:*');
+      await observer.del(key);
+      await http().get(meRoute).set('Cookie', cookie).expect(401);
+    });
+
+    it('rejects the old cookie after repeated sign-in while accepting the new one', async () => {
+      const oldCookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      const newCookie = cookieFrom(await http().post('/api/auth/sign-in').set('Cookie', oldCookie)
+        .send(credentials).expect(200));
+      await http().get(meRoute).set('Cookie', oldCookie).expect(401);
+      await http().get(meRoute).set('Cookie', newCookie).expect(200, { username: credentials.username });
+    });
+
+    it('does not leak unexpected database failures', async () => {
+      const cookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      vi.spyOn(users, 'findById').mockRejectedValueOnce(new Error('private-database-detail'));
+      const response = await http().get(meRoute).set('Cookie', cookie).expect(500);
+      expect(response.body).toEqual({ statusCode: 500, message: 'Internal server error' });
+    });
+
+    it('protects a newly added endpoint without an explicit guard decorator', async () => {
+      await http().get('/api/__protected_probe').expect(401);
+      const cookie = cookieFrom(await http().post(route).send(credentials).expect(201));
+      await http().get('/api/__protected_probe').set('Cookie', cookie).expect(200, { protected: true });
     });
   });
 });
