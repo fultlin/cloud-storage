@@ -10,3 +10,5 @@ export {
   normalizeAndValidatePath,
 } from './paths.js';
 export type { PathValidationOptions } from './paths.js';
+export { createDirectoryQuerySchema, directoryResourceSchema } from './resources.js';
+export type { CreateDirectoryQuery, DirectoryResource } from './resources.js';

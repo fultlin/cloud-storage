@@ -7,6 +7,7 @@ import { AppService } from './app.service.js';
 import { AuthModule } from './auth/auth.module.js';
 import { SessionsModule } from './sessions/sessions.module.js';
 import { StorageModule } from './storage/storage.module.js';
+import { ResourcesModule } from './resources/resources.module.js';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { StorageModule } from './storage/storage.module.js';
     AuthModule,
     SessionsModule,
     StorageModule,
+    ResourcesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

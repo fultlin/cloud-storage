@@ -1,5 +1,5 @@
-import { HeadBucketCommand, HeadObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
+import { BadRequestException, ConflictException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'node:fs';
 import { parseEnv } from 'node:util';
@@ -109,5 +109,30 @@ describe('StorageService', () => {
     send.mockRejectedValueOnce(denied).mockRejectedValueOnce(networkError);
     await expect(storage.resourceExists(1, 'report.txt')).rejects.toBe(denied);
     await expect(storage.resourceExists(1, 'report.txt')).rejects.toBe(networkError);
+  });
+
+  it('creates a zero-byte directory marker under the current user prefix', async () => {
+    await storage.createDirectory(42, 'Документы/');
+    expect(send).toHaveBeenCalledExactlyOnceWith(expect.any(PutObjectCommand));
+    expect(send.mock.calls[0][0]).toMatchObject({ input: {
+      Bucket: 'user-files', Key: 'user-42-files/Документы/',
+      Body: '', ContentLength: 0, IfNoneMatch: '*',
+    } });
+  });
+
+  it('maps a concurrent conditional write conflict to 409', async () => {
+    send.mockRejectedValueOnce(s3Error(412));
+    await expect(storage.createDirectory(42, 'docs/')).rejects.toThrow(ConflictException);
+  });
+
+  it.each(['', 'docs', '../docs/', 'a//b/'])('rejects invalid directory paths before writing', async path => {
+    await expect(storage.createDirectory(42, path)).rejects.toThrow(BadRequestException);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('does not turn a storage write failure into a directory conflict', async () => {
+    const error = s3Error(403);
+    send.mockRejectedValueOnce(error);
+    await expect(storage.createDirectory(42, 'docs/')).rejects.toBe(error);
   });
 });

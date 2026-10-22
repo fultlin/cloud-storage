@@ -1,6 +1,6 @@
-import { normalizeAndValidatePath } from '@app/shared';
-import { HeadBucketCommand, HeadObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
-import { BadRequestException, Injectable, UnauthorizedException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { normalizeAndValidatePath, type PathValidationOptions } from '@app/shared';
+import { HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
+import { BadRequestException, ConflictException, Injectable, UnauthorizedException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ZodError } from 'zod';
 import type { Env } from '../config/env.schema.js';
@@ -55,11 +55,30 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     this.client.destroy();
   }
 
-  private buildKey(userId: number, input: unknown): string {
+  async createDirectory(userId: number, path: string): Promise<void> {
+    const key = this.buildKey(userId, path, 'directory');
+    try {
+      await this.client.send(new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: '',
+        ContentLength: 0,
+        // Проверка на стороне S3 закрывает гонку между предварительной проверкой и записью.
+        IfNoneMatch: '*',
+      }));
+    } catch (error: unknown) {
+      if (error instanceof S3ServiceException && error.$metadata.httpStatusCode === 412) {
+        throw new ConflictException('Directory already exists');
+      }
+      throw error;
+    }
+  }
+
+  private buildKey(userId: number, input: unknown, kind: PathValidationOptions['kind'] = 'resource'): string {
     if (!Number.isSafeInteger(userId) || userId <= 0) throw new UnauthorizedException('Unauthorized');
     const prefix = `user-${userId}-files/`;
     try {
-      const path = normalizeAndValidatePath(input, { keyPrefix: prefix });
+      const path = normalizeAndValidatePath(input, { kind, keyPrefix: prefix });
       return prefix + path;
     } catch (error: unknown) {
       // Не раскрываем клиенту внутренний префикс и подробности Zod.
