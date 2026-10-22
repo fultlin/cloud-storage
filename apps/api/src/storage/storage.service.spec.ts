@@ -42,6 +42,45 @@ describe('StorageService', () => {
     expect(send.mock.calls[0][0]).toMatchObject({ input: { Bucket: 'user-files' } });
   });
 
+  it('returns file metadata without downloading its body or exposing the user prefix', async () => {
+    send.mockImplementationOnce(vi.fn().mockResolvedValue({ ContentLength: 123 }));
+    await expect(storage.getResource(1, 'Документы/Отчёт.txt')).resolves.toEqual({
+      path: 'Документы/', name: 'Отчёт.txt', size: 123, type: 'FILE',
+    });
+    expect(send.mock.calls[0][0]).toBeInstanceOf(HeadObjectCommand);
+    expect(send.mock.calls[0][0]).toMatchObject({ input: { Key: 'user-1-files/Документы/Отчёт.txt' } });
+  });
+
+  it('returns an empty file size of zero', async () => {
+    send.mockImplementationOnce(vi.fn().mockResolvedValue({ ContentLength: 0 }));
+    await expect(storage.getResource(2, 'empty')).resolves.toEqual({ path: '', name: 'empty', size: 0, type: 'FILE' });
+  });
+
+  it('hides the directory marker size', async () => {
+    send.mockImplementationOnce(vi.fn().mockResolvedValue({ ContentLength: 0 }));
+    await expect(storage.getResource(1, 'docs/reports/')).resolves.toEqual({
+      path: 'docs/', name: 'reports', type: 'DIRECTORY',
+    });
+  });
+
+  it('maps missing metadata to a public 404', async () => {
+    send.mockRejectedValueOnce(s3Error(404));
+    await expect(storage.getResource(1, 'missing')).rejects.toMatchObject({
+      response: { statusCode: 404, error: 'Not Found', message: 'Resource not found' },
+    });
+  });
+
+  it('does not disguise access errors as missing resources', async () => {
+    const error = s3Error(403);
+    send.mockRejectedValueOnce(error);
+    await expect(storage.getResource(1, 'secret')).rejects.toBe(error);
+  });
+
+  it('rejects invalid metadata rather than inventing a file size', async () => {
+    send.mockImplementationOnce(vi.fn().mockResolvedValue({}));
+    await expect(storage.getResource(1, 'file')).rejects.toThrow('invalid object size');
+  });
+
   it('blocks startup when the bucket is missing and closes the client', async () => {
     send.mockRejectedValueOnce(s3Error(404));
     await expect(storage.onModuleInit()).rejects.toThrow('Configured S3 bucket does not exist');

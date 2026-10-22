@@ -1,5 +1,5 @@
 import { directoryResourceSchema } from '@app/shared';
-import { ConflictException, Controller, Param, Post, Req } from '@nestjs/common';
+import { ConflictException, Controller, NotFoundException, Param, Post, Req } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -39,6 +39,7 @@ describe('POST /api/directory', () => {
   const storage = {
     resourceExists: vi.fn<StorageService['resourceExists']>(),
     createDirectory: vi.fn<StorageService['createDirectory']>(),
+    getResource: vi.fn<StorageService['getResource']>(),
   };
   let container: StartedTestContainer | undefined;
   let observer: RedisClientType;
@@ -81,6 +82,7 @@ describe('POST /api/directory', () => {
     objects.clear();
     objects.set(1, new Set());
     objects.set(2, new Set());
+    storage.getResource.mockReset().mockRejectedValue(new NotFoundException('Resource not found'));
     storage.resourceExists.mockReset().mockImplementation(async (userId, path) => {
       return typeof path === 'string' && (objects.get(userId)?.has(path) ?? false);
     });
@@ -111,6 +113,35 @@ describe('POST /api/directory', () => {
     expect(directoryResourceSchema.parse(response.body)).toEqual({ path: '', name: 'Документы', type: 'DIRECTORY' });
     expect(storage.createDirectory).toHaveBeenCalledExactlyOnceWith(1, 'Документы/');
     expect(storage.resourceExists).not.toHaveBeenCalledWith(1, '');
+  });
+
+  it('returns resource metadata using only the session identity', async () => {
+    storage.getResource.mockResolvedValueOnce({ path: 'docs/', name: 'report.txt', size: 42, type: 'FILE' });
+    await http().get('/api/resource').query({ path: 'docs/report.txt', userId: 2 })
+      .set('Cookie', firstCookie).expect(200, { path: 'docs/', name: 'report.txt', size: 42, type: 'FILE' });
+    expect(storage.getResource).toHaveBeenCalledExactlyOnceWith(1, 'docs/report.txt');
+  });
+
+  it.each([{}, { path: '' }, { path: '../secret' }, { path: ['a', 'b'] }])
+    ('rejects invalid metadata queries %j before storage', async query => {
+      await http().get('/api/resource').query(query).set('Cookie', firstCookie).expect(400);
+      expect(storage.getResource).not.toHaveBeenCalled();
+    });
+
+  it('protects resource metadata before validation', async () => {
+    await http().get('/api/resource').expect(401);
+    expect(storage.getResource).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for a missing resource', async () => {
+    await http().get('/api/resource').query({ path: 'missing/' }).set('Cookie', firstCookie)
+      .expect(404, { statusCode: 404, error: 'Not Found', message: 'Resource not found' });
+  });
+
+  it('does not expose provider failures in metadata responses', async () => {
+    storage.getResource.mockRejectedValueOnce(new Error('Private S3 endpoint and credentials'));
+    await http().get('/api/resource').query({ path: 'file' }).set('Cookie', firstCookie)
+      .expect(500, { statusCode: 500, message: 'Internal server error' });
   });
 
   it('creates a nested directory only under an existing parent', async () => {

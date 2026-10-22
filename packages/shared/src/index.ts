@@ -12,3 +12,5 @@ export {
 export type { PathValidationOptions } from './paths.js';
 export { createDirectoryQuerySchema, directoryResourceSchema } from './resources.js';
 export type { CreateDirectoryQuery, DirectoryResource } from './resources.js';
+export { resourceQuerySchema, fileResourceSchema, resourceSchema } from './resources.js';
+export type { ResourceQuery, Resource } from './resources.js';

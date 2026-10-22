@@ -1,10 +1,14 @@
-import type { DirectoryResource } from '@app/shared';
+import type { DirectoryResource, Resource } from '@app/shared';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { StorageService } from '../storage/storage.service.js';
 
 @Injectable()
 export class ResourcesService {
   constructor(private readonly storage: StorageService) {}
+
+  getResource(userId: number, path: string): Promise<Resource> {
+    return this.storage.getResource(userId, path);
+  }
 
   async createDirectory(userId: number, path: string): Promise<DirectoryResource> {
     // resourceExists валидирует весь путь и длину ключа до обращения к S3.

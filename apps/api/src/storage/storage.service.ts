@@ -1,6 +1,6 @@
-import { normalizeAndValidatePath, type PathValidationOptions } from '@app/shared';
+import { normalizeAndValidatePath, type Resource, type PathValidationOptions } from '@app/shared';
 import { HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
-import { BadRequestException, ConflictException, Injectable, UnauthorizedException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ZodError } from 'zod';
 import type { Env } from '../config/env.schema.js';
@@ -49,6 +49,30 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
       if (error instanceof S3ServiceException && error.$metadata.httpStatusCode === 404) return false;
       throw error;
     }
+  }
+
+  async getResource(userId: number, path: string): Promise<Resource> {
+    const key = this.buildKey(userId, path);
+    let size: number | undefined;
+    try {
+      const metadata = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+      size = metadata.ContentLength;
+    } catch (error: unknown) {
+      if (error instanceof S3ServiceException && error.$metadata.httpStatusCode === 404) {
+        throw new NotFoundException('Resource not found');
+      }
+      throw error;
+    }
+    // Маркер папки остаётся деталью хранилища; его размер не попадает в ответ.
+    const directory = path.endsWith('/');
+    const fullName = directory ? path.slice(0, -1) : path;
+    const separator = fullName.lastIndexOf('/');
+    const location = { path: fullName.slice(0, separator + 1), name: fullName.slice(separator + 1) };
+    if (directory) return { ...location, type: 'DIRECTORY' };
+    if (size === undefined || !Number.isSafeInteger(size) || size < 0) {
+      throw new Error('S3 returned an invalid object size');
+    }
+    return { ...location, size, type: 'FILE' };
   }
 
   onModuleDestroy(): void {
