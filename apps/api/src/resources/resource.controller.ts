@@ -1,13 +1,23 @@
 import { moveResourceQuerySchema, resourceQuerySchema, type MoveResourceQuery, type ResourceQuery, type Resource } from '@app/shared';
-import { Controller, Delete, Get, HttpCode, Post, Query, Req } from '@nestjs/common';
-import type { Request } from 'express';
+import { Controller, Delete, Get, HttpCode, Post, Query, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
+import { DownloadService } from './download.service.js';
 import { CurrentUserId } from '../auth/current-user-id.decorator.js';
 import { ResourcesService } from './resources.service.js';
 import { UploadService } from './upload.service.js';
 
 @Controller('resource')
 export class ResourceController {
-  constructor(private readonly resources: ResourcesService, private readonly uploads: UploadService) {}
+  constructor(private readonly resources: ResourcesService, private readonly uploads: UploadService, private readonly downloads: DownloadService) {}
+
+  @Get('download')
+  download(
+    @CurrentUserId() userId: number,
+    @Query({ schema: resourceQuerySchema }) query: ResourceQuery,
+    @Res() response: Response,
+  ): Promise<void> {
+    return this.downloads.download(userId, query.path, response);
+  }
 
   @Post('move')
   @HttpCode(200)

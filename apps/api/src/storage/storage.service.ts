@@ -1,9 +1,9 @@
 import { normalizeAndValidatePath, type Resource, type PathValidationOptions } from '@app/shared';
 import { Upload } from '@aws-sdk/lib-storage';
-import { CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command, paginateListObjectsV2, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
+import { CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command, paginateListObjectsV2, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
 import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Transform, type Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { ZodError } from 'zod';
 import type { Env } from '../config/env.schema.js';
@@ -267,6 +267,33 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     const location = splitResourcePath(path);
     if (directory) return { ...location, type: 'DIRECTORY' };
     return { ...location, size: this.requireSize(size), type: 'FILE' };
+  }
+
+  async openFile(userId: number, path: string, signal: AbortSignal): Promise<Readable> {
+    const key = this.buildKey(userId, path, 'file');
+    try {
+      const result = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }), { abortSignal: signal });
+      if (!(result.Body instanceof Readable)) throw new Error('S3 returned no readable file body');
+      return result.Body;
+    } catch (error: unknown) {
+      if (error instanceof S3ServiceException && error.$metadata.httpStatusCode === 404) {
+        throw new NotFoundException('Resource not found');
+      }
+      throw error;
+    }
+  }
+
+  async *downloadEntries(userId: number, path: string, signal: AbortSignal): AsyncGenerator<string> {
+    const prefix = this.buildKey(userId, path, 'directory');
+    const pages = paginateListObjectsV2({ client: this.client }, { Bucket: this.bucket, Prefix: prefix }, { abortSignal: signal });
+    for await (const page of pages) {
+      for (const { Key } of page.Contents ?? []) {
+        signal.throwIfAborted();
+        if (Key === prefix) continue;
+        if (!Key?.startsWith(prefix)) throw new Error('S3 returned an invalid archive entry key');
+        yield normalizeAndValidatePath(Key.slice(prefix.length));
+      }
+    }
   }
 
   private requireSize(size: number | undefined): number {

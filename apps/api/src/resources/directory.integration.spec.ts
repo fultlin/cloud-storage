@@ -6,6 +6,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import type { Request } from 'express';
 import { readFileSync } from 'node:fs';
+import { Readable } from 'node:stream';
 import { parseEnv } from 'node:util';
 import { createClient, type RedisClientType } from 'redis';
 import request from 'supertest';
@@ -40,6 +41,8 @@ describe('POST /api/directory', () => {
     resourceExists: vi.fn<StorageService['resourceExists']>(),
     createDirectory: vi.fn<StorageService['createDirectory']>(),
     getResource: vi.fn<StorageService['getResource']>(),
+    openFile: vi.fn<StorageService['openFile']>(),
+    downloadEntries: vi.fn<StorageService['downloadEntries']>(),
     listDirectory: vi.fn<StorageService['listDirectory']>(),
     deleteResource: vi.fn<StorageService['deleteResource']>(),
     moveResource: vi.fn<StorageService['moveResource']>(),
@@ -90,6 +93,8 @@ describe('POST /api/directory', () => {
     objects.set(1, new Set());
     objects.set(2, new Set());
     storage.getResource.mockReset().mockRejectedValue(new NotFoundException('Resource not found'));
+    storage.openFile.mockReset();
+    storage.downloadEntries.mockReset();
     storage.listDirectory.mockReset().mockResolvedValue([]);
     storage.deleteResource.mockReset().mockResolvedValue(undefined);
     storage.moveResource.mockReset();
@@ -138,6 +143,38 @@ describe('POST /api/directory', () => {
     await http().get('/api/resource').query({ path: 'docs/report.txt', userId: 2 })
       .set('Cookie', firstCookie).expect(200, { path: 'docs/', name: 'report.txt', size: 42, type: 'FILE' });
     expect(storage.getResource).toHaveBeenCalledExactlyOnceWith(1, 'docs/report.txt');
+  });
+
+  it('streams a file as an attachment using the session identity', async () => {
+    storage.getResource.mockResolvedValueOnce({ path: '', name: 'Отчёт.txt', size: 3, type: 'FILE' });
+    storage.openFile.mockResolvedValueOnce(Readable.from(['abc']));
+    const response = await http().get('/api/resource/download').query({ path: 'Отчёт.txt', userId: 2 })
+      .set('Cookie', firstCookie).expect(200).expect('Content-Type', 'application/octet-stream');
+    expect(response.headers['content-disposition']).toContain('filename*=UTF-8');
+    expect(response.body).toEqual(Buffer.from('abc'));
+    expect(storage.openFile).toHaveBeenCalledExactlyOnceWith(1, 'Отчёт.txt', expect.any(AbortSignal));
+  });
+
+  it('streams a ZIP with relative Unicode names and an empty directory', async () => {
+    storage.getResource.mockResolvedValueOnce({ path: '', name: 'docs', type: 'DIRECTORY' });
+    storage.downloadEntries.mockImplementationOnce(async function* () {
+      yield 'Пустая/';
+      yield 'Отчёт.txt';
+    });
+    storage.openFile.mockResolvedValueOnce(Readable.from(['abc']));
+    const response = await http().get('/api/resource/download').query({ path: 'docs/' })
+      .set('Cookie', firstCookie).expect(200);
+    expect(response.headers['content-disposition']).toContain('filename="docs.zip"');
+    expect(response.body.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    expect(response.body.includes(Buffer.from('Пустая/'))).toBe(true);
+    expect(response.body.includes(Buffer.from('Отчёт.txt'))).toBe(true);
+    expect(storage.openFile).toHaveBeenCalledExactlyOnceWith(1, 'docs/Отчёт.txt', expect.any(AbortSignal));
+  });
+
+  it('sends JSON before streaming if the resource is missing', async () => {
+    await http().get('/api/resource/download').query({ path: 'missing' })
+      .set('Cookie', firstCookie).expect(404).expect('Content-Type', /json/);
+    expect(storage.openFile).not.toHaveBeenCalled();
   });
 
   it('accepts the explicit root path and uses the session owner for listing', async () => {

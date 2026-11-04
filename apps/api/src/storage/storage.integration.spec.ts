@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'node:fs';
 import { Readable } from 'node:stream';
+import { text } from 'node:stream/consumers';
 import { parseEnv } from 'node:util';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 import { envSchema } from '../config/env.schema.js';
@@ -94,6 +95,19 @@ describe('StorageService with SeaweedFS', () => {
     await expect(service().moveResource(82, 'source', 'target')).rejects.toThrow(ConflictException);
     await expect(service().getResource(82, 'source')).resolves.toMatchObject({ size: 6 });
     await expect(service().getResource(82, 'target')).resolves.toMatchObject({ size: 7 });
+  });
+
+  it('reads only relative ZIP entries and streams the stored file from SeaweedFS', async () => {
+    await service().createDirectory(90, 'docs/');
+    await service().createDirectory(90, 'docs/Пустая/');
+    await service().uploadFile(90, 'docs/Отчёт.txt', Readable.from(['hello']));
+    const signal = new AbortController().signal;
+    const entries: string[] = [];
+    for await (const entry of service().downloadEntries(90, 'docs/', signal)) entries.push(entry);
+    expect(entries.sort()).toEqual(['Отчёт.txt', 'Пустая/']);
+    const file = await service().openFile(90, 'docs/Отчёт.txt', signal);
+    expect(await text(file)).toBe('hello');
+    await expect(service().openFile(91, 'docs/Отчёт.txt', signal)).rejects.toMatchObject({ status: 404 });
   });
 
   it('streams a multipart file and refuses to overwrite it', async () => {
