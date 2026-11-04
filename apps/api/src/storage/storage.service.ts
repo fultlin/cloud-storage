@@ -1,5 +1,5 @@
 import { normalizeAndValidatePath, type Resource, type PathValidationOptions } from '@app/shared';
-import { HeadBucketCommand, HeadObjectCommand, paginateListObjectsV2, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, DeleteObjectsCommand, HeadBucketCommand, HeadObjectCommand, paginateListObjectsV2, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
 import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ZodError } from 'zod';
@@ -49,6 +49,32 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
       if (error instanceof S3ServiceException && error.$metadata.httpStatusCode === 404) return false;
       throw error;
     }
+  }
+
+  async deleteResource(userId: number, path: string): Promise<void> {
+    const key = this.buildKey(userId, path);
+    if (!(await this.resourceExists(userId, path))) throw new NotFoundException('Resource not found');
+
+    if (path.endsWith('/')) {
+      // Без Delimiter S3 отдаёт все уровни. Одна страница помещается в одну пачку удаления.
+      const pages = paginateListObjectsV2({ client: this.client, pageSize: 1000 }, {
+        Bucket: this.bucket, Prefix: key,
+      });
+      for await (const page of pages) {
+        const objects = [];
+        for (const { Key } of page.Contents ?? []) {
+          if (!Key?.startsWith(key)) throw new Error('S3 returned an invalid object key for deletion');
+          if (Key !== key) objects.push({ Key });
+        }
+        if (!objects.length) continue;
+        const result = await this.client.send(new DeleteObjectsCommand({
+          Bucket: this.bucket, Delete: { Objects: objects, Quiet: true },
+        }));
+        if (result.Errors?.length) throw new Error('S3 failed to delete one or more directory objects');
+      }
+    }
+    // Маркер самой папки удаляем последним, чтобы после сбоя можно было повторить запрос.
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
   }
 
   async listDirectory(userId: number, path: string): Promise<Resource[]> {

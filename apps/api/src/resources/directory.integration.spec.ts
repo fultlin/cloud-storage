@@ -41,6 +41,7 @@ describe('POST /api/directory', () => {
     createDirectory: vi.fn<StorageService['createDirectory']>(),
     getResource: vi.fn<StorageService['getResource']>(),
     listDirectory: vi.fn<StorageService['listDirectory']>(),
+    deleteResource: vi.fn<StorageService['deleteResource']>(),
   };
   let container: StartedTestContainer | undefined;
   let observer: RedisClientType;
@@ -85,6 +86,7 @@ describe('POST /api/directory', () => {
     objects.set(2, new Set());
     storage.getResource.mockReset().mockRejectedValue(new NotFoundException('Resource not found'));
     storage.listDirectory.mockReset().mockResolvedValue([]);
+    storage.deleteResource.mockReset().mockResolvedValue(undefined);
     storage.resourceExists.mockReset().mockImplementation(async (userId, path) => {
       return typeof path === 'string' && (objects.get(userId)?.has(path) ?? false);
     });
@@ -133,6 +135,20 @@ describe('POST /api/directory', () => {
     await http().get('/api/directory').set('Cookie', firstCookie).expect(400);
     await http().get('/api/directory').query({ path: 'file.txt' }).set('Cookie', firstCookie).expect(400);
     expect(storage.listDirectory).not.toHaveBeenCalled();
+  });
+
+  it('deletes as the session user and sends 204 without a body', async () => {
+    const response = await http().delete('/api/resource').query({ path: 'docs/', userId: 2 })
+      .set('Cookie', firstCookie).expect(204);
+    expect(response.text).toBe('');
+    expect(storage.deleteResource).toHaveBeenCalledExactlyOnceWith(1, 'docs/');
+  });
+
+  it('rejects unauthenticated, root and missing-path deletions before storage', async () => {
+    await http().delete('/api/resource?path=file').expect(401);
+    await http().delete('/api/resource?path=').set('Cookie', firstCookie).expect(400);
+    await http().delete('/api/resource').set('Cookie', firstCookie).expect(400);
+    expect(storage.deleteResource).not.toHaveBeenCalled();
   });
 
   it.each([{}, { path: '' }, { path: '../secret' }, { path: ['a', 'b'] }])

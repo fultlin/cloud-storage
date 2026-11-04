@@ -1,4 +1,4 @@
-import { HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, DeleteObjectsCommand, HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
 import { BadRequestException, ConflictException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'node:fs';
@@ -54,6 +54,42 @@ describe('StorageService', () => {
   it('returns an empty file size of zero', async () => {
     send.mockImplementationOnce(vi.fn().mockResolvedValue({ ContentLength: 0 }));
     await expect(storage.getResource(2, 'empty')).resolves.toEqual({ path: '', name: 'empty', size: 0, type: 'FILE' });
+  });
+
+  it('deletes only the exact key for a file', async () => {
+    await storage.deleteResource(1, 'docs');
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1][0]).toBeInstanceOf(DeleteObjectCommand);
+    expect(send.mock.calls[1][0].input).toMatchObject({ Key: 'user-1-files/docs' });
+  });
+
+  it('deletes a large directory page by page and removes its marker last', async () => {
+    const prefix = 'user-1-files/docs/';
+    const first = Array.from({ length: 1000 }, (_, index) => ({ Key: `${prefix}file-${index}` }));
+    const last = { Key: `${prefix}nested/last` };
+    send.mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(vi.fn((command: unknown) => {
+        expect(command).toMatchObject({ input: { Bucket: 'user-files', Prefix: prefix, MaxKeys: 1000, ContinuationToken: undefined } });
+        return Promise.resolve({ Contents: first, NextContinuationToken: 'next' });
+      }))
+      .mockImplementationOnce(vi.fn().mockResolvedValue({}))
+      .mockImplementationOnce(vi.fn().mockResolvedValue({ Contents: [{ Key: prefix }, last] }))
+      .mockImplementationOnce(vi.fn().mockResolvedValue({}));
+    await storage.deleteResource(1, 'docs/');
+    expect(send.mock.calls[2][0]).toBeInstanceOf(DeleteObjectsCommand);
+    expect(send.mock.calls[2][0].input).toMatchObject({ Delete: { Objects: first } });
+    expect(send.mock.calls[3][0].input).toMatchObject({ ContinuationToken: 'next' });
+    expect(send.mock.calls[4][0].input).toMatchObject({ Delete: { Objects: [last] } });
+    expect(send.mock.calls[5][0]).toBeInstanceOf(DeleteObjectCommand);
+    expect(send.mock.calls[5][0].input).toMatchObject({ Key: prefix });
+  });
+
+  it('preserves the folder marker when S3 reports a per-key failure', async () => {
+    send.mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(vi.fn().mockResolvedValue({ Contents: [{ Key: 'user-1-files/docs/file' }] }))
+      .mockImplementationOnce(vi.fn().mockResolvedValue({ Errors: [{ Code: 'AccessDenied' }] }));
+    await expect(storage.deleteResource(1, 'docs/')).rejects.toThrow('failed to delete');
+    expect(send).toHaveBeenCalledTimes(3);
   });
 
   it('lists every S3 page and keeps a file and directory of the same name', async () => {
