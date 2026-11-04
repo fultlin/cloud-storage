@@ -42,6 +42,40 @@ describe('StorageService', () => {
     expect(send.mock.calls[0][0]).toMatchObject({ input: { Bucket: 'user-files' } });
   });
 
+  it('accepts the explicit root upload destination without touching S3', async () => {
+    await expect(storage.validateUploadDestination(1, '')).resolves.toBe('');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing upload destination with 400 under the current user prefix', async () => {
+    send.mockRejectedValueOnce(s3Error(404));
+    await expect(storage.validateUploadDestination(2, 'docs/')).rejects.toThrow(BadRequestException);
+    expect(send.mock.calls[0][0].input).toMatchObject({ Key: 'user-2-files/docs/' });
+  });
+
+  it.each([undefined, 'docs', '../docs/'])('rejects invalid upload destination %s before S3', async path => {
+    await expect(storage.validateUploadDestination(1, path)).rejects.toThrow(BadRequestException);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('preserves a nested Unicode multipart filename without decoding percent sequences', () => {
+    expect(storage.planUploadFile(1, 'docs/', 'Папка/Год/Отчёт %2F.txt')).toEqual({
+      path: 'docs/Папка/Год/Отчёт %2F.txt', parent: 'docs/Папка/Год/', name: 'Отчёт %2F.txt',
+      directories: ['docs/Папка/', 'docs/Папка/Год/'],
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it.each(['', '/file', '../file', 'folder/', 'a\\b'])('rejects invalid multipart filename %s', filename => {
+    expect(() => storage.planUploadFile(1, 'docs/', filename)).toThrow(BadRequestException);
+  });
+
+  it('checks the full upload key length after joining the destination and filename', () => {
+    const directory = ['a', 'b', 'c'].map(letter => letter.repeat(255)).join('/') + '/';
+    const filename = 'x'.repeat(255);
+    expect(() => storage.planUploadFile(1, directory, filename)).toThrow(BadRequestException);
+  });
+
   it('returns file metadata without downloading its body or exposing the user prefix', async () => {
     send.mockImplementationOnce(vi.fn().mockResolvedValue({ ContentLength: 123 }));
     await expect(storage.getResource(1, 'Документы/Отчёт.txt')).resolves.toEqual({

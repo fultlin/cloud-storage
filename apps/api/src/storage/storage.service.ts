@@ -51,6 +51,32 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async validateUploadDestination(userId: number, path: unknown): Promise<string> {
+    const directory = this.validateRelativePath(userId, path, 'directory-or-root');
+    if (directory !== '' && !(await this.resourceExists(userId, directory))) {
+      throw new BadRequestException('Upload directory does not exist');
+    }
+    return directory;
+  }
+
+  planUploadFile(userId: number, destination: string, filename: unknown) {
+    const directory = this.validateRelativePath(userId, destination, 'directory-or-root');
+    // Проверяем имя отдельно: префикс назначения не должен скрыть ведущий слеш или пустое имя.
+    const relativeFile = this.validateRelativePath(userId, filename, 'file');
+    const path = this.validateRelativePath(userId, directory + relativeFile, 'file');
+    const separator = relativeFile.lastIndexOf('/');
+    const name = relativeFile.slice(separator + 1);
+    const directories: string[] = [];
+    let parent = directory;
+    if (separator !== -1) {
+      for (const segment of relativeFile.slice(0, separator).split('/')) {
+        parent += `${segment}/`;
+        directories.push(parent);
+      }
+    }
+    return { path, parent, name, directories };
+  }
+
   async deleteResource(userId: number, path: string): Promise<void> {
     const key = this.buildKey(userId, path);
     if (!(await this.resourceExists(userId, path))) throw new NotFoundException('Resource not found');
@@ -155,11 +181,18 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
   }
 
   private buildKey(userId: number, input: unknown, kind: PathValidationOptions['kind'] = 'resource'): string {
+    return this.userPrefix(userId) + this.validateRelativePath(userId, input, kind);
+  }
+
+  private userPrefix(userId: number): string {
     if (!Number.isSafeInteger(userId) || userId <= 0) throw new UnauthorizedException('Unauthorized');
-    const prefix = `user-${userId}-files/`;
+    return `user-${userId}-files/`;
+  }
+
+  private validateRelativePath(userId: number, input: unknown, kind: PathValidationOptions['kind']): string {
+    const keyPrefix = this.userPrefix(userId);
     try {
-      const path = normalizeAndValidatePath(input, { kind, keyPrefix: prefix });
-      return prefix + path;
+      return normalizeAndValidatePath(input, { kind, keyPrefix });
     } catch (error: unknown) {
       // Не раскрываем клиенту внутренний префикс и подробности Zod.
       if (error instanceof ZodError) throw new BadRequestException('Invalid resource path');
