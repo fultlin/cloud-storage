@@ -14,3 +14,5 @@ export { createDirectoryQuerySchema, directoryResourceSchema } from './resources
 export type { CreateDirectoryQuery, DirectoryResource } from './resources.js';
 export { resourceQuerySchema, fileResourceSchema, resourceSchema } from './resources.js';
 export type { ResourceQuery, Resource } from './resources.js';
+export { listDirectoryQuerySchema } from './resources.js';
+export type { ListDirectoryQuery } from './resources.js';

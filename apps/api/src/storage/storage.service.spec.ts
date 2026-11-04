@@ -1,4 +1,4 @@
-import { HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
+import { HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
 import { BadRequestException, ConflictException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'node:fs';
@@ -54,6 +54,23 @@ describe('StorageService', () => {
   it('returns an empty file size of zero', async () => {
     send.mockImplementationOnce(vi.fn().mockResolvedValue({ ContentLength: 0 }));
     await expect(storage.getResource(2, 'empty')).resolves.toEqual({ path: '', name: 'empty', size: 0, type: 'FILE' });
+  });
+
+  it('lists every S3 page and keeps a file and directory of the same name', async () => {
+    send.mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(vi.fn().mockResolvedValue({
+        Contents: [{ Key: 'user-1-files/docs/', Size: 0 }, { Key: 'user-1-files/docs/Отчёт', Size: 0 }],
+        NextContinuationToken: 'next-page',
+      })).mockImplementationOnce(vi.fn().mockResolvedValue({
+        CommonPrefixes: [{ Prefix: 'user-1-files/docs/Отчёт/' }],
+      }));
+    await expect(storage.listDirectory(1, 'docs/')).resolves.toEqual([
+      { path: 'docs/', name: 'Отчёт', size: 0, type: 'FILE' },
+      { path: 'docs/', name: 'Отчёт', type: 'DIRECTORY' },
+    ]);
+    expect(send.mock.calls[1][0]).toBeInstanceOf(ListObjectsV2Command);
+    expect(send.mock.calls[1][0].input).toMatchObject({ Prefix: 'user-1-files/docs/', Delimiter: '/' });
+    expect(send.mock.calls[2][0].input).toMatchObject({ ContinuationToken: 'next-page' });
   });
 
   it('hides the directory marker size', async () => {

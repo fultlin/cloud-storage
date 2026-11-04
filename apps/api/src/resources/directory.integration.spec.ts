@@ -40,6 +40,7 @@ describe('POST /api/directory', () => {
     resourceExists: vi.fn<StorageService['resourceExists']>(),
     createDirectory: vi.fn<StorageService['createDirectory']>(),
     getResource: vi.fn<StorageService['getResource']>(),
+    listDirectory: vi.fn<StorageService['listDirectory']>(),
   };
   let container: StartedTestContainer | undefined;
   let observer: RedisClientType;
@@ -83,6 +84,7 @@ describe('POST /api/directory', () => {
     objects.set(1, new Set());
     objects.set(2, new Set());
     storage.getResource.mockReset().mockRejectedValue(new NotFoundException('Resource not found'));
+    storage.listDirectory.mockReset().mockResolvedValue([]);
     storage.resourceExists.mockReset().mockImplementation(async (userId, path) => {
       return typeof path === 'string' && (objects.get(userId)?.has(path) ?? false);
     });
@@ -120,6 +122,17 @@ describe('POST /api/directory', () => {
     await http().get('/api/resource').query({ path: 'docs/report.txt', userId: 2 })
       .set('Cookie', firstCookie).expect(200, { path: 'docs/', name: 'report.txt', size: 42, type: 'FILE' });
     expect(storage.getResource).toHaveBeenCalledExactlyOnceWith(1, 'docs/report.txt');
+  });
+
+  it('accepts the explicit root path and uses the session owner for listing', async () => {
+    await http().get('/api/directory?path=&userId=2').set('Cookie', firstCookie).expect(200, []);
+    expect(storage.listDirectory).toHaveBeenCalledExactlyOnceWith(1, '');
+  });
+
+  it('rejects absent and file paths for directory listings', async () => {
+    await http().get('/api/directory').set('Cookie', firstCookie).expect(400);
+    await http().get('/api/directory').query({ path: 'file.txt' }).set('Cookie', firstCookie).expect(400);
+    expect(storage.listDirectory).not.toHaveBeenCalled();
   });
 
   it.each([{}, { path: '' }, { path: '../secret' }, { path: ['a', 'b'] }])

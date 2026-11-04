@@ -1,5 +1,5 @@
 import { normalizeAndValidatePath, type Resource, type PathValidationOptions } from '@app/shared';
-import { HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
+import { HeadBucketCommand, HeadObjectCommand, paginateListObjectsV2, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
 import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ZodError } from 'zod';
@@ -51,6 +51,32 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async listDirectory(userId: number, path: string): Promise<Resource[]> {
+    const prefix = this.buildKey(userId, path, 'directory-or-root');
+    if (path !== '' && !(await this.resourceExists(userId, path))) {
+      throw new NotFoundException('Directory does not exist');
+    }
+
+    const children: Resource[] = [];
+    const pages = paginateListObjectsV2({ client: this.client }, {
+      Bucket: this.bucket, Prefix: prefix, Delimiter: '/',
+    });
+    for await (const page of pages) {
+      for (const { Key, Size } of page.Contents ?? []) {
+        if (Key === prefix) continue; // Маркер самой папки не является её содержимым.
+        const name = Key?.startsWith(prefix) ? Key.slice(prefix.length) : '';
+        if (!name || name.includes('/')) throw new Error('S3 returned an invalid child object key');
+        children.push({ path, name, size: this.requireSize(Size), type: 'FILE' });
+      }
+      for (const { Prefix } of page.CommonPrefixes ?? []) {
+        const name = Prefix?.startsWith(prefix) && Prefix.endsWith('/') ? Prefix.slice(prefix.length, -1) : '';
+        if (!name || name.includes('/')) throw new Error('S3 returned an invalid child prefix');
+        children.push({ path, name, type: 'DIRECTORY' });
+      }
+    }
+    return children;
+  }
+
   async getResource(userId: number, path: string): Promise<Resource> {
     const key = this.buildKey(userId, path);
     let size: number | undefined;
@@ -69,10 +95,14 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     const separator = fullName.lastIndexOf('/');
     const location = { path: fullName.slice(0, separator + 1), name: fullName.slice(separator + 1) };
     if (directory) return { ...location, type: 'DIRECTORY' };
+    return { ...location, size: this.requireSize(size), type: 'FILE' };
+  }
+
+  private requireSize(size: number | undefined): number {
     if (size === undefined || !Number.isSafeInteger(size) || size < 0) {
       throw new Error('S3 returned an invalid object size');
     }
-    return { ...location, size, type: 'FILE' };
+    return size;
   }
 
   onModuleDestroy(): void {

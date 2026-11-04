@@ -21,3 +21,6 @@ export const fileResourceSchema = z.object({
 });
 export const resourceSchema = z.discriminatedUnion('type', [directoryResourceSchema, fileResourceSchema]);
 export type Resource = z.infer<typeof resourceSchema>;
+
+export const listDirectoryQuerySchema = z.object({ path: directoryOrRootPathSchema });
+export type ListDirectoryQuery = z.infer<typeof listDirectoryQuerySchema>;

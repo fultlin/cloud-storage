@@ -62,6 +62,21 @@ describe('StorageService with SeaweedFS', () => {
     await expect(service().createDirectory(42, 'duplicate/')).rejects.toThrow(ConflictException);
   });
 
+  it('lists only direct children, hides markers and isolates the root by user', async () => {
+    await service().createDirectory(55, 'Документы/');
+    await service().createDirectory(55, 'Документы/Отчёты/');
+    await service().createDirectory(55, 'Документы/Отчёты/Архив/');
+    await expect(service().listDirectory(55, '')).resolves.toEqual([
+      { path: '', name: 'Документы', type: 'DIRECTORY' },
+    ]);
+    await expect(service().listDirectory(55, 'Документы/')).resolves.toEqual([
+      { path: 'Документы/', name: 'Отчёты', type: 'DIRECTORY' },
+    ]);
+    await expect(service().listDirectory(55, 'Документы/Отчёты/Архив/')).resolves.toEqual([]);
+    await expect(service().listDirectory(56, '')).resolves.toEqual([]);
+    await expect(service().listDirectory(56, 'Документы/')).rejects.toMatchObject({ status: 404 });
+  });
+
   it('allows only one of two simultaneous writes of the same directory', async () => {
     const results = await Promise.allSettled([
       service().createDirectory(42, 'race/'),
