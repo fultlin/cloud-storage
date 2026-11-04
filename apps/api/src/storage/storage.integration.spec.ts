@@ -1,10 +1,17 @@
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'node:fs';
+import { Readable } from 'node:stream';
 import { parseEnv } from 'node:util';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 import { envSchema } from '../config/env.schema.js';
 import { StorageService } from './storage.service.js';
+
+function fileChunks(mebibytes: number): Readable {
+  return Readable.from((function* () {
+    for (let index = 0; index < mebibytes; index++) yield Buffer.alloc(1024 ** 2, 42);
+  })(), { objectMode: false });
+}
 
 const example = parseEnv(readFileSync(new URL('../../../../.env.example', import.meta.url), 'utf8'));
 const localConfig = envSchema.parse(example);
@@ -12,6 +19,7 @@ const localConfig = envSchema.parse(example);
 describe('StorageService with SeaweedFS', () => {
   let container: StartedTestContainer | undefined;
   let storage: StorageService | undefined;
+  let limitedStorage: StorageService | undefined;
 
   function service(): StorageService {
     if (!storage) throw new Error('Test storage is not initialized');
@@ -41,11 +49,13 @@ describe('StorageService with SeaweedFS', () => {
       S3_ENDPOINT: `http://${container.getHost()}:${container.getMappedPort(8333)}`,
     });
     storage = new StorageService(new ConfigService(config));
+    limitedStorage = new StorageService(new ConfigService({ ...config, UPLOAD_MAX_FILE_SIZE_BYTES: 6 * 1024 ** 2 }));
     await storage.onModuleInit();
   }, 120_000);
 
   afterAll(async () => {
     storage?.onModuleDestroy();
+    limitedStorage?.onModuleDestroy();
     await container?.stop();
   }, 30_000);
 
@@ -60,6 +70,21 @@ describe('StorageService with SeaweedFS', () => {
   it('rejects a repeated conditional write', async () => {
     await service().createDirectory(42, 'duplicate/');
     await expect(service().createDirectory(42, 'duplicate/')).rejects.toThrow(ConflictException);
+  });
+
+  it('streams a multipart file and refuses to overwrite it', async () => {
+    const path = 'Отчёт #1.txt';
+    await expect(service().uploadFile(71, path, fileChunks(6))).resolves.toBe(6 * 1024 ** 2);
+    await expect(service().uploadFile(71, path, Readable.from(['replacement']))).rejects.toThrow(ConflictException);
+    await expect(service().uploadFile(71, path, fileChunks(7))).rejects.toThrow(ConflictException);
+    await expect(service().getResource(71, path)).resolves.toMatchObject({ size: 6 * 1024 ** 2 });
+    await expect(service().resourceExists(72, path)).resolves.toBe(false);
+  }, 30_000);
+
+  it('does not publish a file when its stream exceeds the size limit', async () => {
+    if (!limitedStorage) throw new Error('Test storage is not initialized');
+    await expect(limitedStorage.uploadFile(71, 'too-large', fileChunks(8))).rejects.toThrow(BadRequestException);
+    await expect(limitedStorage.resourceExists(71, 'too-large')).resolves.toBe(false);
   });
 
   it('deletes a subtree without deleting siblings or another user’s subtree', async () => {

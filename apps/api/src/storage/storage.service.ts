@@ -1,7 +1,10 @@
 import { normalizeAndValidatePath, type Resource, type PathValidationOptions } from '@app/shared';
+import { Upload } from '@aws-sdk/lib-storage';
 import { DeleteObjectCommand, DeleteObjectsCommand, HeadBucketCommand, HeadObjectCommand, paginateListObjectsV2, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
 import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Transform, type Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { ZodError } from 'zod';
 import type { Env } from '../config/env.schema.js';
 
@@ -9,9 +12,11 @@ import type { Env } from '../config/env.schema.js';
 export class StorageService implements OnModuleInit, OnModuleDestroy {
   private readonly client: S3Client;
   private readonly bucket: string;
+  private readonly maxFileSize: number;
 
   constructor(config: ConfigService<Env, true>) {
     this.bucket = config.get('S3_BUCKET', { infer: true });
+    this.maxFileSize = config.get('UPLOAD_MAX_FILE_SIZE_BYTES', { infer: true });
     this.client = new S3Client({
       endpoint: config.get('S3_ENDPOINT', { infer: true }),
       region: config.get('S3_REGION', { infer: true }),
@@ -75,6 +80,41 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
       }
     }
     return { path, parent, name, directories };
+  }
+
+  async uploadFile(userId: number, path: string, source: Readable): Promise<number> {
+    const key = this.buildKey(userId, path, 'file');
+    let size = 0;
+    const limit = this.maxFileSize;
+    const body = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        size += chunk.byteLength;
+        if (size > limit) callback(new BadRequestException('File exceeds the upload size limit'));
+        else callback(null, chunk);
+      },
+    });
+    const upload = new Upload({
+      client: this.client,
+      params: { Bucket: this.bucket, Key: key, Body: body, IfNoneMatch: '*' },
+      queueSize: 1,
+      partSize: 5 * 1024 ** 2,
+      leavePartsOnError: false,
+    });
+    const sending = upload.done().catch((error: unknown) => {
+      body.destroy();
+      throw error;
+    });
+    // Ждём завершения SDK: при ошибке потока он сам убирает незавершённые части.
+    const [pumping, writing] = await Promise.allSettled([pipeline(source, body), sending]);
+    if (writing.status === 'rejected') {
+      const error: unknown = writing.reason;
+      if (error instanceof S3ServiceException && error.$metadata.httpStatusCode === 412) {
+        throw new ConflictException('File already exists');
+      }
+      if (pumping.status === 'rejected' && pumping.reason instanceof BadRequestException) throw pumping.reason;
+      throw error;
+    }
+    return size;
   }
 
   async deleteResource(userId: number, path: string): Promise<void> {
