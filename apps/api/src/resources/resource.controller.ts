@@ -1,11 +1,18 @@
 import { resourceQuerySchema, type ResourceQuery, type Resource } from '@app/shared';
-import { Controller, Delete, Get, HttpCode, Query } from '@nestjs/common';
+import { Controller, Delete, Get, HttpCode, Post, Query, Req } from '@nestjs/common';
+import type { Request } from 'express';
 import { CurrentUserId } from '../auth/current-user-id.decorator.js';
 import { ResourcesService } from './resources.service.js';
+import { UploadService } from './upload.service.js';
 
 @Controller('resource')
 export class ResourceController {
-  constructor(private readonly resources: ResourcesService) {}
+  constructor(private readonly resources: ResourcesService, private readonly uploads: UploadService) {}
+
+  @Post()
+  upload(@CurrentUserId() userId: number, @Query('path') path: unknown, @Req() request: Request): Promise<Resource[]> {
+    return this.uploads.upload(userId, path, request);
+  }
 
   @Delete()
   @HttpCode(204)

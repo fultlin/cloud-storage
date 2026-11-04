@@ -117,6 +117,13 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     return size;
   }
 
+  async rollbackUploadObject(userId: number, path: string): Promise<void> {
+    const key = this.buildKey(userId, path);
+    // Другой запрос мог заполнить созданную нами папку. Не удаляем её содержимое.
+    if (path.endsWith('/') && (await this.listDirectory(userId, path)).length) return;
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
+
   async deleteResource(userId: number, path: string): Promise<void> {
     const key = this.buildKey(userId, path);
     if (!(await this.resourceExists(userId, path))) throw new NotFoundException('Resource not found');

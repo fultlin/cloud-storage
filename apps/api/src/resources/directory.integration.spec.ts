@@ -1,5 +1,5 @@
 import { directoryResourceSchema } from '@app/shared';
-import { ConflictException, Controller, NotFoundException, Param, Post, Req } from '@nestjs/common';
+import { BadRequestException, ConflictException, Controller, NotFoundException, Param, Post, Req } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -42,6 +42,10 @@ describe('POST /api/directory', () => {
     getResource: vi.fn<StorageService['getResource']>(),
     listDirectory: vi.fn<StorageService['listDirectory']>(),
     deleteResource: vi.fn<StorageService['deleteResource']>(),
+    validateUploadDestination: vi.fn<StorageService['validateUploadDestination']>(),
+    planUploadFile: vi.fn<StorageService['planUploadFile']>(),
+    uploadFile: vi.fn<StorageService['uploadFile']>(),
+    rollbackUploadObject: vi.fn<StorageService['rollbackUploadObject']>(),
   };
   let container: StartedTestContainer | undefined;
   let observer: RedisClientType;
@@ -59,7 +63,7 @@ describe('POST /api/directory', () => {
       .withExposedPorts(6379)
       .withWaitStrategy(Wait.forLogMessage('Ready to accept connections')).start();
     const redisUrl = `redis://${container.getHost()}:${container.getMappedPort(6379)}`;
-    const config = envSchema.parse({ ...example, REDIS_URL: redisUrl });
+    const config = envSchema.parse({ ...example, REDIS_URL: redisUrl, UPLOAD_MAX_FILES: '2', UPLOAD_MAX_FILE_SIZE_BYTES: '3' });
     const moduleFixture = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
@@ -87,6 +91,14 @@ describe('POST /api/directory', () => {
     storage.getResource.mockReset().mockRejectedValue(new NotFoundException('Resource not found'));
     storage.listDirectory.mockReset().mockResolvedValue([]);
     storage.deleteResource.mockReset().mockResolvedValue(undefined);
+    storage.validateUploadDestination.mockReset().mockResolvedValue('');
+    storage.planUploadFile.mockReset().mockReturnValue({ path: 'Папка/Отчёт.txt', parent: 'Папка/', name: 'Отчёт.txt', directories: ['Папка/'] });
+    storage.uploadFile.mockReset().mockImplementation(async (_user, _path, source) => {
+      let size = 0;
+      for await (const chunk of source) size += Buffer.byteLength(chunk);
+      return size;
+    });
+    storage.rollbackUploadObject.mockReset().mockResolvedValue(undefined);
     storage.resourceExists.mockReset().mockImplementation(async (userId, path) => {
       return typeof path === 'string' && (objects.get(userId)?.has(path) ?? false);
     });
@@ -149,6 +161,42 @@ describe('POST /api/directory', () => {
     await http().delete('/api/resource?path=').set('Cookie', firstCookie).expect(400);
     await http().delete('/api/resource').set('Cookie', firstCookie).expect(400);
     expect(storage.deleteResource).not.toHaveBeenCalled();
+  });
+
+  function multipart(...files: Array<string | { name: string; body: string }>): string {
+    return files.map(file => {
+      const { name, body } = typeof file === 'string' ? { name: file, body: 'abc' } : file;
+      return `--test\r\nContent-Disposition: form-data; name="files"; filename="${name}"\r\n\r\n${body}\r\n`;
+    }).join('') + '--test--\r\n';
+  }
+
+  it('preserves UTF-8 multipart paths and streams the file', async () => {
+    await http().post('/api/resource?path=').set('Cookie', firstCookie)
+      .set('Content-Type', 'multipart/form-data; boundary=test').send(multipart('Папка/Отчёт.txt'))
+      .expect(201, [{ path: 'Папка/', name: 'Отчёт.txt', size: 3, type: 'FILE' }]);
+    expect(storage.validateUploadDestination).toHaveBeenCalledExactlyOnceWith(1, '');
+    expect(storage.planUploadFile).toHaveBeenCalledExactlyOnceWith(1, '', 'Папка/Отчёт.txt');
+  });
+
+  it('rolls back the written file and new directory when a later file conflicts', async () => {
+    await http().post('/api/resource?path=').set('Cookie', firstCookie)
+      .set('Content-Type', 'multipart/form-data; boundary=test').send(multipart('Папка/Отчёт.txt', 'Папка/Отчёт.txt'))
+      .expect(409);
+    expect(storage.uploadFile).toHaveBeenCalledOnce();
+    expect(storage.rollbackUploadObject.mock.calls).toEqual([[1, 'Папка/Отчёт.txt'], [1, 'Папка/']]);
+  });
+
+  it.each([multipart({ name: 'large.txt', body: 'abcd' }), multipart('a', 'b', 'c')])
+    ('returns 400 for an upload over the configured size or count limit', async body => {
+      await http().post('/api/resource?path=').set('Cookie', firstCookie)
+        .set('Content-Type', 'multipart/form-data; boundary=test').send(body).expect(400);
+    });
+
+  it('rejects an invalid destination before processing multipart files', async () => {
+    storage.validateUploadDestination.mockRejectedValueOnce(new BadRequestException('Upload directory does not exist'));
+    await http().post('/api/resource?path=missing%2F').set('Cookie', firstCookie)
+      .set('Content-Type', 'multipart/form-data; boundary=test').send(multipart('file.txt')).expect(400);
+    expect(storage.uploadFile).not.toHaveBeenCalled();
   });
 
   it.each([{}, { path: '' }, { path: '../secret' }, { path: ['a', 'b'] }])

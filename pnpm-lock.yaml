@@ -47,6 +47,9 @@ importers:
       argon2:
         specifier: ^0.45.1
         version: 0.45.1
+      busboy:
+        specifier: ^1.6.0
+        version: 1.6.0
       connect-redis:
         specifier: ^10.0.0
         version: 10.0.0(express-session@1.19.0)(redis@6.3.0)
@@ -84,6 +87,9 @@ importers:
       '@testcontainers/postgresql':
         specifier: ^12.2.1
         version: 12.2.1
+      '@types/busboy':
+        specifier: ^1.5.5
+        version: 1.5.5
       '@types/express':
         specifier: ^5.0.0
         version: 5.0.6
@@ -1002,6 +1008,7 @@ packages:
   '@smithy/core@3.36.0':
     resolution: {integrity: sha512-3hJiwG1F5t1SoXqp/yOCmYXziyx7ZVqF63S5W6YU201e/qwVaHPex+E/3vvyY9a3ORq/b+BydeNZpP2saQ9X2g==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -1038,6 +1045,9 @@ packages:
 
   '@types/body-parser@1.19.6':
     resolution: {integrity: sha512-HLFeCYgz89uk22N5Qg3dvGvsv46B8GLvKKo1zKG4NybA8U2DiEO3w9lqGg29t/tfLRJpJ6iQxnVw4OnB7MoM9g==}
+
+  '@types/busboy@1.5.5':
+    resolution: {integrity: sha512-IwqrfVFxWa23c4WeE7uZswssCqGfvnl5Q7b1pdshbT3HaQDa3UIbJx5BAxtcj9nZYX9tVDArM9TUv9SpvORbpQ==}
 
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
@@ -3828,6 +3838,10 @@ snapshots:
   '@types/body-parser@1.19.6':
     dependencies:
       '@types/connect': 3.4.38
+      '@types/node': 24.19.2
+
+  '@types/busboy@1.5.5':
+    dependencies:
       '@types/node': 24.19.2
 
   '@types/chai@5.2.3':
