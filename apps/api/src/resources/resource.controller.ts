@@ -1,4 +1,4 @@
-import { moveResourceQuerySchema, resourceQuerySchema, type MoveResourceQuery, type ResourceQuery, type Resource } from '@app/shared';
+import { moveResourceQuerySchema, resourceQuerySchema, searchResourcesQuerySchema, type MoveResourceQuery, type ResourceQuery, type Resource, type SearchResourcesQuery } from '@app/shared';
 import { Controller, Delete, Get, HttpCode, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { DownloadService } from './download.service.js';
@@ -9,6 +9,14 @@ import { UploadService } from './upload.service.js';
 @Controller('resource')
 export class ResourceController {
   constructor(private readonly resources: ResourcesService, private readonly uploads: UploadService, private readonly downloads: DownloadService) {}
+
+  @Get('search')
+  search(
+    @CurrentUserId() userId: number,
+    @Query({ schema: searchResourcesQuerySchema }) query: SearchResourcesQuery,
+  ): Promise<Resource[]> {
+    return this.resources.searchResources(userId, query.query);
+  }
 
   @Get('download')
   download(

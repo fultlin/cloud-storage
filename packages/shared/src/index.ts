@@ -18,3 +18,5 @@ export { listDirectoryQuerySchema } from './resources.js';
 export type { ListDirectoryQuery } from './resources.js';
 export { moveResourceQuerySchema } from './resources.js';
 export type { MoveResourceQuery } from './resources.js';
+export { searchResourcesQuerySchema } from './resources.js';
+export type { SearchResourcesQuery } from './resources.js';

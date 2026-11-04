@@ -110,6 +110,17 @@ describe('StorageService with SeaweedFS', () => {
     await expect(service().openFile(91, 'docs/Отчёт.txt', signal)).rejects.toMatchObject({ status: 404 });
   });
 
+  it('finds names case-insensitively in one user’s tree', async () => {
+    await service().createDirectory(94, 'Отчёт/');
+    await service().uploadFile(94, 'Отчёт/notes.txt', Readable.from(['b']));
+    await service().uploadFile(94, 'Работа/Отчёт 2.txt', Readable.from(['cc']));
+    await service().uploadFile(95, 'Отчёт чужой.txt', Readable.from(['d']));
+    await expect(service().searchResources(94, 'оТЧЁТ')).resolves.toEqual([
+      { path: '', name: 'Отчёт', type: 'DIRECTORY' },
+      { path: 'Работа/', name: 'Отчёт 2.txt', size: 2, type: 'FILE' },
+    ]);
+  });
+
   it('streams a multipart file and refuses to overwrite it', async () => {
     const path = 'Отчёт #1.txt';
     await expect(service().uploadFile(71, path, fileChunks(6))).resolves.toBe(6 * 1024 ** 2);

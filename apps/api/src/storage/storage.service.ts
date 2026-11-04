@@ -224,6 +224,36 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
   }
 
+  async searchResources(userId: number, query: string): Promise<Resource[]> {
+    const prefix = this.buildKey(userId, '', 'directory-or-root');
+    const needle = query.toLowerCase();
+    const directories = new Set<string>();
+    const matches: { key: string; resource: Resource }[] = [];
+    const pages = paginateListObjectsV2({ client: this.client }, { Bucket: this.bucket, Prefix: prefix });
+    for await (const page of pages) {
+      for (const { Key, Size } of page.Contents ?? []) {
+        if (Key === prefix) continue;
+        if (!Key?.startsWith(prefix)) throw new Error('S3 returned an invalid search result key');
+        const relative = Key.slice(prefix.length);
+        const location = splitResourcePath(relative);
+        const marker = relative.endsWith('/');
+        if (!marker && location.name.toLowerCase().includes(needle)) {
+          matches.push({ key: relative, resource: { ...location, type: 'FILE', size: this.requireSize(Size) } });
+        }
+        let directory = marker ? relative : location.path;
+        while (directory && !directories.has(directory)) {
+          directories.add(directory);
+          const parent = splitResourcePath(directory);
+          if (parent.name.toLowerCase().includes(needle)) {
+            matches.push({ key: directory, resource: { ...parent, type: 'DIRECTORY' } });
+          }
+          directory = parent.path;
+        }
+      }
+    }
+    return matches.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0).map(match => match.resource);
+  }
+
   async listDirectory(userId: number, path: string): Promise<Resource[]> {
     const prefix = this.buildKey(userId, path, 'directory-or-root');
     if (path !== '' && !(await this.resourceExists(userId, path))) {

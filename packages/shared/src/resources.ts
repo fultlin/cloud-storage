@@ -27,3 +27,8 @@ export type ListDirectoryQuery = z.infer<typeof listDirectoryQuerySchema>;
 
 export const moveResourceQuerySchema = z.object({ from: resourcePathSchema, to: resourcePathSchema });
 export type MoveResourceQuery = z.infer<typeof moveResourceQuerySchema>;
+
+export const searchResourcesQuerySchema = z.object({
+  query: z.string().trim().min(1).refine(value => Array.from(value).length <= 100, 'Query must contain at most 100 characters'),
+});
+export type SearchResourcesQuery = z.infer<typeof searchResourcesQuerySchema>;

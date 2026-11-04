@@ -41,6 +41,7 @@ describe('POST /api/directory', () => {
     resourceExists: vi.fn<StorageService['resourceExists']>(),
     createDirectory: vi.fn<StorageService['createDirectory']>(),
     getResource: vi.fn<StorageService['getResource']>(),
+    searchResources: vi.fn<StorageService['searchResources']>(),
     openFile: vi.fn<StorageService['openFile']>(),
     downloadEntries: vi.fn<StorageService['downloadEntries']>(),
     listDirectory: vi.fn<StorageService['listDirectory']>(),
@@ -93,6 +94,7 @@ describe('POST /api/directory', () => {
     objects.set(1, new Set());
     objects.set(2, new Set());
     storage.getResource.mockReset().mockRejectedValue(new NotFoundException('Resource not found'));
+    storage.searchResources.mockReset().mockResolvedValue([]);
     storage.openFile.mockReset();
     storage.downloadEntries.mockReset();
     storage.listDirectory.mockReset().mockResolvedValue([]);
@@ -143,6 +145,20 @@ describe('POST /api/directory', () => {
     await http().get('/api/resource').query({ path: 'docs/report.txt', userId: 2 })
       .set('Cookie', firstCookie).expect(200, { path: 'docs/', name: 'report.txt', size: 42, type: 'FILE' });
     expect(storage.getResource).toHaveBeenCalledExactlyOnceWith(1, 'docs/report.txt');
+  });
+
+  it('trims the search query and takes the search scope from the session', async () => {
+    await http().get('/api/resource/search').query({ query: '  Отчёт  ', userId: 2 })
+      .set('Cookie', firstCookie).expect(200, []);
+    expect(storage.searchResources).toHaveBeenCalledExactlyOnceWith(1, 'Отчёт');
+  });
+
+  it('rejects missing, blank, long and repeated search queries', async () => {
+    for (const query of [undefined, '  ', 'а'.repeat(101), ['a', 'b']]) {
+      await http().get('/api/resource/search').query({ query }).set('Cookie', firstCookie).expect(400);
+    }
+    await http().get('/api/resource/search?query=test').expect(401);
+    expect(storage.searchResources).not.toHaveBeenCalled();
   });
 
   it('streams a file as an attachment using the session identity', async () => {

@@ -47,6 +47,20 @@ describe('StorageService', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('searches across S3 pages and emits an implicit parent only once', async () => {
+    send.mockImplementationOnce(vi.fn().mockResolvedValue({
+      Contents: [{ Key: 'user-1-files/docs/one', Size: 1 }], NextContinuationToken: 'next',
+    })).mockImplementationOnce(vi.fn().mockResolvedValue({
+      Contents: [{ Key: 'user-1-files/docs/two', Size: 2 }, { Key: 'user-1-files/docs/', Size: 0 }, { Key: 'user-1-files/docs', Size: 3 }],
+    }));
+    await expect(storage.searchResources(1, 'DOC')).resolves.toEqual([
+      { path: '', name: 'docs', size: 3, type: 'FILE' },
+      { path: '', name: 'docs', type: 'DIRECTORY' },
+    ]);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1][0].input).toMatchObject({ Prefix: 'user-1-files/', ContinuationToken: 'next' });
+  });
+
   it.each([['a', 'a'], ['a', 'b/'], ['a/', 'a/b/a/'], ['a/file', 'b/renamed']])
     ('rejects invalid moves from %s to %s before contacting S3', async (from, to) => {
       await expect(storage.moveResource(1, from, to)).rejects.toThrow(BadRequestException);
