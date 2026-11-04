@@ -72,6 +72,30 @@ describe('StorageService with SeaweedFS', () => {
     await expect(service().createDirectory(42, 'duplicate/')).rejects.toThrow(ConflictException);
   });
 
+  it('renames a Unicode directory tree and moves a file without renaming it', async () => {
+    await service().createDirectory(81, 'Папка #1/');
+    await service().createDirectory(81, 'Папка #1/Вложенная/');
+    const name = 'Отчёт 100%.txt';
+    await service().uploadFile(81, `Папка #1/Вложенная/${name}`, Readable.from(['hello']));
+    await expect(service().moveResource(81, 'Папка #1/', 'Новая папка/')).resolves.toEqual({
+      path: '', name: 'Новая папка', type: 'DIRECTORY',
+    });
+    await expect(service().resourceExists(81, 'Папка #1/')).resolves.toBe(false);
+    await expect(service().resourceExists(81, `Папка #1/Вложенная/${name}`)).resolves.toBe(false);
+    await expect(service().moveResource(81, `Новая папка/Вложенная/${name}`, name)).resolves.toEqual({
+      path: '', name, size: 5, type: 'FILE',
+    });
+    await expect(service().listDirectory(81, 'Новая папка/Вложенная/')).resolves.toEqual([]);
+  }, 30_000);
+
+  it('keeps both files when the move destination is occupied', async () => {
+    await service().uploadFile(82, 'source', Readable.from(['source']));
+    await service().uploadFile(82, 'target', Readable.from(['target!']));
+    await expect(service().moveResource(82, 'source', 'target')).rejects.toThrow(ConflictException);
+    await expect(service().getResource(82, 'source')).resolves.toMatchObject({ size: 6 });
+    await expect(service().getResource(82, 'target')).resolves.toMatchObject({ size: 7 });
+  });
+
   it('streams a multipart file and refuses to overwrite it', async () => {
     const path = 'Отчёт #1.txt';
     await expect(service().uploadFile(71, path, fileChunks(6))).resolves.toBe(6 * 1024 ** 2);

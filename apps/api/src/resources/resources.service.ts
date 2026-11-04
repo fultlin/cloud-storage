@@ -6,6 +6,10 @@ import { StorageService } from '../storage/storage.service.js';
 export class ResourcesService {
   constructor(private readonly storage: StorageService) {}
 
+  moveResource(userId: number, from: string, to: string): Promise<Resource> {
+    return this.storage.moveResource(userId, from, to);
+  }
+
   deleteResource(userId: number, path: string): Promise<void> {
     return this.storage.deleteResource(userId, path);
   }

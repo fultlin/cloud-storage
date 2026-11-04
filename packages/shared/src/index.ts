@@ -16,3 +16,5 @@ export { resourceQuerySchema, fileResourceSchema, resourceSchema } from './resou
 export type { ResourceQuery, Resource } from './resources.js';
 export { listDirectoryQuerySchema } from './resources.js';
 export type { ListDirectoryQuery } from './resources.js';
+export { moveResourceQuerySchema } from './resources.js';
+export type { MoveResourceQuery } from './resources.js';

@@ -42,6 +42,7 @@ describe('POST /api/directory', () => {
     getResource: vi.fn<StorageService['getResource']>(),
     listDirectory: vi.fn<StorageService['listDirectory']>(),
     deleteResource: vi.fn<StorageService['deleteResource']>(),
+    moveResource: vi.fn<StorageService['moveResource']>(),
     validateUploadDestination: vi.fn<StorageService['validateUploadDestination']>(),
     planUploadFile: vi.fn<StorageService['planUploadFile']>(),
     uploadFile: vi.fn<StorageService['uploadFile']>(),
@@ -91,6 +92,7 @@ describe('POST /api/directory', () => {
     storage.getResource.mockReset().mockRejectedValue(new NotFoundException('Resource not found'));
     storage.listDirectory.mockReset().mockResolvedValue([]);
     storage.deleteResource.mockReset().mockResolvedValue(undefined);
+    storage.moveResource.mockReset();
     storage.validateUploadDestination.mockReset().mockResolvedValue('');
     storage.planUploadFile.mockReset().mockReturnValue({ path: 'Папка/Отчёт.txt', parent: 'Папка/', name: 'Отчёт.txt', directories: ['Папка/'] });
     storage.uploadFile.mockReset().mockImplementation(async (_user, _path, source) => {
@@ -154,6 +156,16 @@ describe('POST /api/directory', () => {
       .set('Cookie', firstCookie).expect(204);
     expect(response.text).toBe('');
     expect(storage.deleteResource).toHaveBeenCalledExactlyOnceWith(1, 'docs/');
+  });
+
+  it('moves as the session user and returns the new resource with 200', async () => {
+    const moved = { path: '', name: 'новая', type: 'DIRECTORY' } as const;
+    storage.moveResource.mockResolvedValueOnce(moved);
+    await http().post('/api/resource/move').query({ from: 'старая/', to: 'новая/', userId: 2 })
+      .set('Cookie', firstCookie).expect(200, moved);
+    expect(storage.moveResource).toHaveBeenCalledExactlyOnceWith(1, 'старая/', 'новая/');
+    await http().post('/api/resource/move?from=old').set('Cookie', firstCookie).expect(400);
+    expect(storage.moveResource).toHaveBeenCalledOnce();
   });
 
   it('rejects unauthenticated, root and missing-path deletions before storage', async () => {

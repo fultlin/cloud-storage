@@ -1,12 +1,18 @@
 import { normalizeAndValidatePath, type Resource, type PathValidationOptions } from '@app/shared';
 import { Upload } from '@aws-sdk/lib-storage';
-import { DeleteObjectCommand, DeleteObjectsCommand, HeadBucketCommand, HeadObjectCommand, paginateListObjectsV2, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
+import { CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, HeadBucketCommand, HeadObjectCommand, ListObjectsV2Command, paginateListObjectsV2, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
 import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Transform, type Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { ZodError } from 'zod';
 import type { Env } from '../config/env.schema.js';
+
+function splitResourcePath(path: string) {
+  const fullName = path.endsWith('/') ? path.slice(0, -1) : path;
+  const separator = fullName.lastIndexOf('/');
+  return { path: fullName.slice(0, separator + 1), name: fullName.slice(separator + 1) };
+}
 
 @Injectable()
 export class StorageService implements OnModuleInit, OnModuleDestroy {
@@ -124,6 +130,78 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
   }
 
+  async moveResource(userId: number, from: string, to: string): Promise<Resource> {
+    const source = this.buildKey(userId, from);
+    const target = this.buildKey(userId, to);
+    const directory = from.endsWith('/');
+    const origin = splitResourcePath(from);
+    const destination = splitResourcePath(to);
+    if (from === to || directory !== to.endsWith('/') || (directory && to.startsWith(from)) ||
+      (origin.path !== destination.path && origin.name !== destination.name)) {
+      throw new BadRequestException('Invalid move paths');
+    }
+    const resource = await this.getResource(userId, from);
+    if (destination.path && !(await this.resourceExists(userId, destination.path))) {
+      throw new NotFoundException('Destination directory does not exist');
+    }
+    if (await this.resourceExists(userId, to)) throw new ConflictException('Destination already exists');
+
+    const copies = [{ source, target }];
+    if (directory) {
+      // An orphaned subtree also occupies the destination, even without a marker.
+      const occupied = await this.client.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: target, MaxKeys: 1 }));
+      if (occupied.Contents?.length) throw new ConflictException('Destination already exists');
+      const pages = paginateListObjectsV2({ client: this.client }, { Bucket: this.bucket, Prefix: source });
+      for await (const page of pages) {
+        for (const { Key } of page.Contents ?? []) {
+          if (!Key?.startsWith(source)) throw new Error('S3 returned an invalid object key for move');
+          if (Key === source) continue;
+          const suffix = Key.slice(source.length);
+          copies.push({ source: Key, target: this.buildKey(userId, to + suffix) });
+        }
+      }
+    }
+
+    for (const copy of copies) {
+      try {
+        if (copy.source.endsWith('/')) {
+          // SeaweedFS exposes directory markers via HEAD but cannot copy them via CopyObject.
+          await this.client.send(new PutObjectCommand({
+            Bucket: this.bucket, Key: copy.target, Body: '', ContentLength: 0, IfNoneMatch: '*',
+          }));
+        } else {
+          await this.client.send(new CopyObjectCommand({
+            Bucket: this.bucket, Key: copy.target, IfNoneMatch: '*',
+            CopySource: `${this.bucket}/${copy.source.split('/').map(encodeURIComponent).join('/')}`,
+          }));
+        }
+      } catch (error: unknown) {
+        if (error instanceof S3ServiceException && [409, 412].includes(error.$metadata.httpStatusCode ?? 0)) {
+          throw new ConflictException('Destination already exists');
+        }
+        throw error;
+      }
+    }
+    // SeaweedFS can only remove a directory marker once its children are gone.
+    const files = copies.slice(1).filter(copy => !copy.source.endsWith('/'));
+    for (let offset = 0; offset < files.length; offset += 1000) {
+      await this.deleteBatch(files.slice(offset, offset + 1000).map(copy => ({ Key: copy.source })));
+    }
+    const markers = copies.filter(copy => copy.source.endsWith('/')).sort((a, b) => b.source.length - a.source.length);
+    for (const { source: marker } of markers) {
+      await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: marker }));
+    }
+    if (!directory) await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: source }));
+    return { ...resource, ...destination };
+  }
+
+  private async deleteBatch(objects: { Key: string }[]): Promise<void> {
+    const result = await this.client.send(new DeleteObjectsCommand({
+      Bucket: this.bucket, Delete: { Objects: objects, Quiet: true },
+    }));
+    if (result.Errors?.length) throw new Error('S3 failed to delete one or more directory objects');
+  }
+
   async deleteResource(userId: number, path: string): Promise<void> {
     const key = this.buildKey(userId, path);
     if (!(await this.resourceExists(userId, path))) throw new NotFoundException('Resource not found');
@@ -139,11 +217,7 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
           if (!Key?.startsWith(key)) throw new Error('S3 returned an invalid object key for deletion');
           if (Key !== key) objects.push({ Key });
         }
-        if (!objects.length) continue;
-        const result = await this.client.send(new DeleteObjectsCommand({
-          Bucket: this.bucket, Delete: { Objects: objects, Quiet: true },
-        }));
-        if (result.Errors?.length) throw new Error('S3 failed to delete one or more directory objects');
+        if (objects.length) await this.deleteBatch(objects);
       }
     }
     // Маркер самой папки удаляем последним, чтобы после сбоя можно было повторить запрос.
@@ -190,9 +264,7 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     }
     // Маркер папки остаётся деталью хранилища; его размер не попадает в ответ.
     const directory = path.endsWith('/');
-    const fullName = directory ? path.slice(0, -1) : path;
-    const separator = fullName.lastIndexOf('/');
-    const location = { path: fullName.slice(0, separator + 1), name: fullName.slice(separator + 1) };
+    const location = splitResourcePath(path);
     if (directory) return { ...location, type: 'DIRECTORY' };
     return { ...location, size: this.requireSize(size), type: 'FILE' };
   }

@@ -47,6 +47,25 @@ describe('StorageService', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it.each([['a', 'a'], ['a', 'b/'], ['a/', 'a/b/a/'], ['a/file', 'b/renamed']])
+    ('rejects invalid moves from %s to %s before contacting S3', async (from, to) => {
+      await expect(storage.moveResource(1, from, to)).rejects.toThrow(BadRequestException);
+      expect(send).not.toHaveBeenCalled();
+    });
+
+  it('never deletes source objects when a child copy fails', async () => {
+    const failure = new Error('copy failed');
+    send.mockImplementationOnce(vi.fn().mockResolvedValue({ ContentLength: 0 }))
+      .mockRejectedValueOnce(s3Error(404))
+      .mockImplementationOnce(vi.fn().mockResolvedValue({}))
+      .mockImplementationOnce(vi.fn().mockResolvedValue({ Contents: [{ Key: 'user-1-files/a/child' }] }))
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(failure);
+    await expect(storage.moveResource(1, 'a/', 'b/')).rejects.toBe(failure);
+    expect(send).toHaveBeenCalledTimes(6);
+    expect(send.mock.calls.some(([command]) => command instanceof DeleteObjectCommand || command instanceof DeleteObjectsCommand)).toBe(false);
+  });
+
   it('rejects a missing upload destination with 400 under the current user prefix', async () => {
     send.mockRejectedValueOnce(s3Error(404));
     await expect(storage.validateUploadDestination(2, 'docs/')).rejects.toThrow(BadRequestException);

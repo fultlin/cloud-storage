@@ -24,3 +24,6 @@ export type Resource = z.infer<typeof resourceSchema>;
 
 export const listDirectoryQuerySchema = z.object({ path: directoryOrRootPathSchema });
 export type ListDirectoryQuery = z.infer<typeof listDirectoryQuerySchema>;
+
+export const moveResourceQuerySchema = z.object({ from: resourcePathSchema, to: resourcePathSchema });
+export type MoveResourceQuery = z.infer<typeof moveResourceQuerySchema>;
