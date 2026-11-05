@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@app/shared": "workspace:*",
+    "@tanstack/react-query": "^5.105.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router": "^8.5.1"

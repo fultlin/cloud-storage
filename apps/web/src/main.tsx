@@ -1,6 +1,8 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { queryClient } from './api/query-client.js'
 import './index.css'
 import App from './App.js'
 
@@ -17,7 +19,7 @@ if (import.meta.env.DEV && import.meta.env.VITE_MOCK_API === 'true') {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter><App /></BrowserRouter>
+    <QueryClientProvider client={queryClient}><BrowserRouter><App /></BrowserRouter></QueryClientProvider>
   </StrictMode>,
 )
 
