@@ -1,0 +1,14 @@
+{
+  "verifiedAt": "2026-11-05T16:25:51.384Z",
+  "node": "v24.14.0",
+  "seaweed": "4.48",
+  "bytes": 2147483648,
+  "sha256": "c1248aac9d79b7753db12424977d5249577f7128903ee6cf93b417697b9860de",
+  "apiBaselineRss": 180879360,
+  "apiPeakRss": 306106368,
+  "apiRssGrowth": 125227008,
+  "elapsedSeconds": 55.915,
+  "transport": "HTTP multipart upload and HTTP streaming download",
+  "isolatedContainers": true,
+  "nginx": false
+}

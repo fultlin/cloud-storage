@@ -171,6 +171,18 @@ pnpm --filter @app/api exec vitest run src/storage/storage.integration.spec.ts -
 Remove-Item Env:RUN_LARGE_STORAGE_TEST
 ```
 
+Полный прогон через HTTP с отдельным процессом API:
+
+```powershell
+pnpm --filter @app/api verify:large-http
+```
+
+Сценарий поднимает временные PostgreSQL, Redis и SeaweedFS, применяет миграции,
+регистрирует тестового пользователя, передаёт 2 ГиБ через multipart и скачивает
+файл потоком. RSS API измеряется отдельно от клиента; проверяется SHA-256.
+Результат сохраняется в `apps/api/verification/large-http.json`.
+После завершения временные контейнеры удаляются, локальный Compose не используется.
+
 Анонимные запросы не создают cookie и записи Redis. Регистрация пересоздаёт
 идентификатор сессии, записывает userId в Redis и устанавливает cookie sid.
 Ответ 201 содержит только username. Ошибки: 400 при невалидном вводе, 409 при
