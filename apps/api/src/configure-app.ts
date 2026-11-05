@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { Env } from './config/env.schema.js';
 import { SessionsService } from './sessions/sessions.service.js';
+import { configureOpenApi } from './openapi.js';
 
 // Одинаковая HTTP-настройка для main.ts и интеграционных тестов.
 export function configureApp(app: NestExpressApplication): void {
@@ -11,4 +12,5 @@ export function configureApp(app: NestExpressApplication): void {
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new StandardSchemaValidationPipe());
   app.use(app.get(SessionsService).middleware);
+  if (config.get('SWAGGER_ENABLED', { infer: true })) configureOpenApi(app);
 }

@@ -1,9 +1,11 @@
 import { credentialsSchema, type Credentials } from '@app/shared';
 import { Body, Controller, HttpCode, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { ApiCookieAuth, ApiCreatedResponse, ApiNoContentResponse, ApiOkResponse } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { SessionsService } from '../sessions/sessions.service.js';
 import { UsersService } from '../users/users.service.js';
 import { Public } from './public.decorator.js';
+import { ApiErrors, publicUserSchema, SESSION_SECURITY } from '../openapi.js';
 
 @Controller('auth')
 export class AuthController {
@@ -13,6 +15,8 @@ export class AuthController {
   ) {}
 
   @Post('sign-up')
+  @ApiCreatedResponse({ standardSchema: publicUserSchema })
+  @ApiErrors(400, 409, 500)
   @Public()
   async signUp(
     @Body({ schema: credentialsSchema }) credentials: Credentials,
@@ -25,6 +29,8 @@ export class AuthController {
   }
 
   @Post('sign-in')
+  @ApiOkResponse({ standardSchema: publicUserSchema })
+  @ApiErrors(400, 401, 500)
   @Public()
   @HttpCode(200)
   async signIn(
@@ -41,6 +47,9 @@ export class AuthController {
   }
 
   @Post('sign-out')
+  @ApiCookieAuth(SESSION_SECURITY)
+  @ApiNoContentResponse({ description: 'Session ended' })
+  @ApiErrors(401, 500)
   @HttpCode(204)
   async signOut(
     @Req() req: Request,

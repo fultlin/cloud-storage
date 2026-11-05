@@ -138,6 +138,14 @@ GET /api/resource/search?query=report ищет подстроку в имени 
 найденные ресурсы сортируются по полному пути. Отдельного индекса поиска нет.
 Известное ограничение SeaweedFS 4.48: запись файла с именем уже существующей
 одноимённой папки может вернуть 409, хотя контракт допускает оба ресурса.
+
+При `SWAGGER_ENABLED=true` API публикует Swagger UI на `/api/docs` и JSON на
+`/api/docs-json`. После изменения API выгрузите JSON и перегенерируйте типы:
+
+```powershell
+curl.exe --noproxy "*" --fail http://127.0.0.1:3000/api/docs-json -o apps/web/openapi.json
+pnpm --filter @app/web api:generate
+```
 В shared доступны usernameSchema, passwordSchema, credentialsSchema и тип Credentials.
 Регистрация и вход используют credentialsSchema через StandardSchemaValidationPipe.
 Подключение к React-формам — следующая задача фронтенд-этапа.
