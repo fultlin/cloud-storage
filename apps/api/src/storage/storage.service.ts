@@ -207,6 +207,7 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     if (!(await this.resourceExists(userId, path))) throw new NotFoundException('Resource not found');
 
     if (path.endsWith('/')) {
+      const markers: string[] = [];
       // Без Delimiter S3 отдаёт все уровни. Одна страница помещается в одну пачку удаления.
       const pages = paginateListObjectsV2({ client: this.client, pageSize: 1000 }, {
         Bucket: this.bucket, Prefix: key,
@@ -215,9 +216,16 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
         const objects = [];
         for (const { Key } of page.Contents ?? []) {
           if (!Key?.startsWith(key)) throw new Error('S3 returned an invalid object key for deletion');
-          if (Key !== key) objects.push({ Key });
+          if (Key === key) continue;
+          if (Key.endsWith('/')) markers.push(Key);
+          else objects.push({ Key });
         }
         if (objects.length) await this.deleteBatch(objects);
+      }
+      // Filer-backed S3 providers cannot remove a directory until its files are gone.
+      markers.sort((a, b) => b.length - a.length);
+      for (const marker of markers) {
+        await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: marker }));
       }
     }
     // Маркер самой папки удаляем последним, чтобы после сбоя можно было повторить запрос.

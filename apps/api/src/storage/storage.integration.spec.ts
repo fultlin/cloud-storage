@@ -139,11 +139,13 @@ describe('StorageService with SeaweedFS', () => {
   it('deletes a subtree without deleting siblings or another user’s subtree', async () => {
     await service().createDirectory(61, 'Удалить/');
     await service().createDirectory(61, 'Удалить/Вложенная/');
+    await service().uploadFile(61, 'Удалить/Вложенная/Файл.txt', Readable.from(['abc']));
     await service().createDirectory(61, 'Удалить позже/');
     await service().createDirectory(62, 'Удалить/');
     await service().deleteResource(61, 'Удалить/');
     expect(await service().resourceExists(61, 'Удалить/')).toBe(false);
     expect(await service().resourceExists(61, 'Удалить/Вложенная/')).toBe(false);
+    expect(await service().resourceExists(61, 'Удалить/Вложенная/Файл.txt')).toBe(false);
     expect(await service().resourceExists(61, 'Удалить позже/')).toBe(true);
     expect(await service().resourceExists(62, 'Удалить/')).toBe(true);
     await expect(service().deleteResource(61, 'Удалить/')).rejects.toMatchObject({ status: 404 });

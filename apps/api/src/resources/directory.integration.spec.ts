@@ -193,6 +193,46 @@ describe('POST /api/directory', () => {
     expect(storage.openFile).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['get', '/api/resource?path=file'], ['delete', '/api/resource?path=file'],
+    ['get', '/api/resource/download?path=file'], ['get', '/api/resource/search?query=a'],
+    ['post', '/api/resource?path='], ['post', '/api/resource/move?from=a&to=b'],
+    ['get', '/api/directory?path='], ['post', '/api/directory?path=docs%2F'],
+  ] as const)('requires a session for %s %s', async (method, path) => {
+    await http()[method](path).expect(401);
+  });
+
+  it.each(['../secret', '/absolute', 'a//b', 'a\\b', 'a\u0000b'])
+    ('rejects unsafe paths on every path-taking operation: %s', async path => {
+      for (const method of ['get', 'delete'] as const) {
+        await http()[method]('/api/resource').query({ path }).set('Cookie', firstCookie).expect(400);
+      }
+      await http().get('/api/resource/download').query({ path }).set('Cookie', firstCookie).expect(400);
+      await http().post('/api/resource').query({ path }).set('Cookie', firstCookie).expect(400);
+      for (const method of ['get', 'post'] as const) {
+        await http()[method]('/api/directory').query({ path }).set('Cookie', firstCookie).expect(400);
+      }
+      await http().post('/api/resource/move').query({ from: path, to: 'safe' }).set('Cookie', firstCookie).expect(400);
+      await http().post('/api/resource/move').query({ from: 'safe', to: path }).set('Cookie', firstCookie).expect(400);
+    });
+
+  it('rejects URL-encoded traversal before the download handler', async () => {
+    await http().get('/api/resource/download?path=%2E%2E%2Fsecret')
+      .set('Cookie', firstCookie).expect(400);
+    expect(storage.openFile).not.toHaveBeenCalled();
+  });
+
+  it('aborts the response when a file fails after it has started streaming', async () => {
+    storage.getResource.mockResolvedValueOnce({ path: '', name: 'file', size: 10, type: 'FILE' });
+    storage.openFile.mockResolvedValueOnce(Readable.from((async function* () {
+      yield 'first';
+      await new Promise(resolve => setTimeout(resolve, 20));
+      throw new Error('provider stream failure');
+    })()));
+    await expect(http().get('/api/resource/download?path=file').set('Cookie', firstCookie))
+      .rejects.toThrow(/aborted|reset|closed/i);
+  });
+
   it('accepts the explicit root path and uses the session owner for listing', async () => {
     await http().get('/api/directory?path=&userId=2').set('Cookie', firstCookie).expect(200, []);
     expect(storage.listDirectory).toHaveBeenCalledExactlyOnceWith(1, '');
