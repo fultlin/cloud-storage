@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { text } from 'node:stream/consumers';
 import { parseEnv } from 'node:util';
@@ -72,6 +73,46 @@ describe('StorageService with SeaweedFS', () => {
     await service().createDirectory(42, 'duplicate/');
     await expect(service().createDirectory(42, 'duplicate/')).rejects.toThrow(ConflictException);
   });
+
+  it('records the provider limitation for a file sharing an existing directory name', async () => {
+    await service().createDirectory(102, 'same/');
+    await expect(service().uploadFile(102, 'same', Readable.from(['payload']))).rejects.toThrow(ConflictException);
+    await expect(service().getResource(102, 'same/')).resolves.toMatchObject({ type: 'DIRECTORY' });
+  });
+
+  it.runIf(process.env.RUN_LARGE_STORAGE_TEST === 'true')('streams 2 GiB without proportional process memory growth', async () => {
+    const bytes = 2 * 1024 ** 3;
+    const before = process.memoryUsage().rss;
+    let peak = before;
+    const sample = setInterval(() => { peak = Math.max(peak, process.memoryUsage().rss); }, 100);
+    const inputHash = createHash('sha256');
+    const outputHash = createHash('sha256');
+    try {
+      const source = Readable.from((function* () {
+        for (let index = 0; index < 2048; index++) {
+          const chunk = Buffer.alloc(1024 ** 2, index % 251);
+          inputHash.update(chunk);
+          yield chunk;
+        }
+      })(), { objectMode: false });
+      expect(await service().uploadFile(103, 'large.bin', source)).toBe(bytes);
+      const body = await service().openFile(103, 'large.bin', new AbortController().signal);
+      let downloaded = 0;
+      for await (const chunk of body) {
+        downloaded += chunk.length;
+        outputHash.update(chunk);
+      }
+      expect(downloaded).toBe(bytes);
+      expect(outputHash.digest('hex')).toBe(inputHash.digest('hex'));
+      peak = Math.max(peak, process.memoryUsage().rss);
+      const growth = peak - before;
+      console.info(JSON.stringify({ bytes, baselineRss: before, peakRss: peak, growth }));
+      expect(growth).toBeLessThan(512 * 1024 ** 2);
+      await service().deleteResource(103, 'large.bin');
+    } finally {
+      clearInterval(sample);
+    }
+  }, 600_000);
 
   it('renames a Unicode directory tree and moves a file without renaming it', async () => {
     await service().createDirectory(81, 'Папка #1/');

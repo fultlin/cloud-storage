@@ -160,6 +160,17 @@ TTL, восстановление сессии после пересоздани
 HTTP-тесты папок используют отдельный Redis и подменённый StorageService.
 Тесты StorageService отдельно проверяют команды SDK и настоящую условную запись
 на временном SeaweedFS. Локальные файлы разработчика не затрагиваются.
+
+Тяжёлый тест передачи 2 ГиБ включается отдельно. Он использует временный контейнер,
+сверяет SHA-256 и размер скачанного файла, печатает исходный и пиковый RSS процесса.
+Проверяется StorageService; это не заменяет прогон через HTTP и nginx.
+
+```powershell
+$env:RUN_LARGE_STORAGE_TEST='true'
+pnpm --filter @app/api exec vitest run src/storage/storage.integration.spec.ts -t 'streams 2 GiB'
+Remove-Item Env:RUN_LARGE_STORAGE_TEST
+```
+
 Анонимные запросы не создают cookie и записи Redis. Регистрация пересоздаёт
 идентификатор сессии, записывает userId в Redis и устанавливает cookie sid.
 Ответ 201 содержит только username. Ошибки: 400 при невалидном вводе, 409 при
