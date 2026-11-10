@@ -13,6 +13,6 @@ RUN pnpm --filter @app/shared build && pnpm --filter @app/web build
 FROM nginx:1.30.6-alpine
 # 100 файлов × 5 ГиБ плюс запас для заголовков multipart.
 ENV NGINX_CLIENT_MAX_BODY_SIZE=501g
-ENV NGINX_ENVSUBST_FILTER=^NGINX_CLIENT_MAX_BODY_SIZE$
+ENV NGINX_ENVSUBST_FILTER="^(NGINX_CLIENT_MAX_BODY_SIZE|NGINX_HTTPS_AUTHORITY)$"
 COPY --from=build /workspace/apps/web/dist/ /usr/share/nginx/html/
 COPY apps/web/nginx/default.conf.template /etc/nginx/templates/default.conf.template

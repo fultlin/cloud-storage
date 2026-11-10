@@ -1,0 +1,18 @@
+services:
+  api:
+    environment:
+      COOKIE_SECURE: 'true'
+
+  web:
+    environment:
+      NGINX_HTTPS_AUTHORITY: ${HTTPS_PUBLIC_AUTHORITY:?Set HTTPS_PUBLIC_AUTHORITY to the public hostname}
+    ports:
+      - '${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_HTTPS_PORT:-443}:443'
+    volumes:
+      - ./apps/web/nginx/tls.conf.template:/etc/nginx/templates/snippets/tls.conf.template:ro
+      - type: bind
+        source: ${TLS_CERT_DIR:?Set TLS_CERT_DIR to the directory containing fullchain.pem and privkey.pem}
+        target: /etc/nginx/tls
+        read_only: true
+        bind:
+          create_host_path: false

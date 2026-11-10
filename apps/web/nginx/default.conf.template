@@ -1,5 +1,6 @@
 server {
     listen 80;
+    include /etc/nginx/conf.d/snippets/*.conf;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
