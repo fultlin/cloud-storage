@@ -1,0 +1,54 @@
+import { expect, test } from '@playwright/test';
+
+test('mock browser: auth, mutations, upload, search and mobile layout', async ({ page }) => {
+  await page.goto('/files/');
+  await page.getByLabel('Имя пользователя').fill('demo_user');
+  await page.getByLabel('Пароль', { exact: true }).fill('demo_pass123');
+  await page.getByRole('button', { name: 'Войти', exact: true }).click();
+  await expect(page.getByText('Прочитай меня.txt')).toBeVisible();
+  await page.getByRole('button', { name: 'Новая папка', exact: true }).click();
+  await page.getByLabel('Имя папки').fill('Новая папка');
+  await page.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(page.getByRole('link', { name: 'Новая папка', exact: true })).toBeVisible();
+  const row = page.getByRole('row').filter({ hasText: 'Новая папка' });
+  await row.getByRole('button', { name: 'Переименовать' }).click();
+  await page.getByLabel('Имя ресурса').fill('100% #2?');
+  await page.getByRole('button', { name: 'Сохранить' }).click();
+  await page.getByRole('link', { name: '100% #2?', exact: true }).click();
+  await expect(page).toHaveURL(/100%25%20%232%3F/);
+  await expect(page.getByRole('heading', { name: 'Папка пуста' })).toBeVisible();
+  await page.getByLabel('Загрузить файлы', { exact: true }).setInputFiles({ name: 'test.txt', mimeType: 'text/plain', buffer: Buffer.from('hello') });
+  await expect(page.getByText('test.txt', { exact: true })).toBeVisible();
+  await page.getByRole('row').filter({ hasText: 'test.txt' }).getByRole('button', { name: 'Переместить' }).click();
+  await page.getByRole('button', { name: 'В корень', exact: true }).click();
+  await page.getByRole('button', { name: 'Переместить сюда' }).click();
+  await expect(page.getByRole('heading', { name: 'Папка пуста' })).toBeVisible();
+  await page.getByRole('link', { name: 'Мои файлы', exact: true }).last().click();
+  await expect(page.getByText('test.txt', { exact: true })).toBeVisible();
+  await page.screenshot({ path: 'test-results/files-desktop.png', fullPage: true });
+  await page.getByLabel('Поиск по имени').fill('test');
+  await expect(page).toHaveURL(/search\?query=test/);
+  await expect(page.getByText('test.txt', { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: 'test-results/search-mobile.png', fullPage: true });
+  await page.getByRole('row').filter({ hasText: 'test.txt' }).getByRole('button', { name: 'Удалить', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('dialog').getByRole('button', { name: 'Удалить', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Ничего не найдено' })).toBeVisible();
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Вход в Облако' })).toBeVisible();
+});
+
+test('mock browser: a later 401 redirects to sign-in and preserves the destination', async ({ page }) => {
+  await page.goto('/files/100%25%20%231%3F/');
+  await page.getByLabel('Имя пользователя').fill('demo_user');
+  await page.getByLabel('Пароль', { exact: true }).fill('demo_pass123');
+  await page.getByRole('button', { name: 'Войти', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Папка пуста' })).toBeVisible();
+  await page.evaluate(() => fetch('/api/auth/sign-out', { method: 'POST' }));
+  await page.getByRole('button', { name: 'Новая папка', exact: true }).click();
+  await page.getByLabel('Имя папки').fill('test');
+  await page.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(page.getByRole('heading', { name: 'Вход в Облако' })).toBeVisible();
+  expect(new URL(page.url()).searchParams.get('returnTo')).toBe('/files/100%25%20%231%3F/');
+});

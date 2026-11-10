@@ -62,4 +62,25 @@ describe('mock API contract', () => {
     server.use(http.get('*/api/user/me', () => HttpResponse.json({ statusCode: 500, message: 'Internal server error' }, { status: 500 })));
     expect((await fetch(base + '/user/me')).status).toBe(500);
   });
+
+  it('supports resource mutations and preserves atomic upload conflicts', async () => {
+    await post('/auth/sign-in', credentials);
+    expect((await post('/directory?path=new%2F')).status).toBe(201);
+    expect((await post('/directory?path=new%2F')).status).toBe(409);
+    const upload = new FormData();
+    upload.append('files', new File(['hello'], 'new/Отчёт.txt'));
+    const written = await fetch(base + '/resource?path=', { method: 'POST', body: upload });
+    expect(written.status).toBe(201);
+    expect(await written.json()).toEqual([{ path: 'new/', name: 'Отчёт.txt', type: 'FILE', size: 5 }]);
+    const duplicate = new FormData();
+    duplicate.append('files', new File(['a'], 'first.txt'));
+    duplicate.append('files', new File(['b'], 'new/Отчёт.txt'));
+    expect((await fetch(base + '/resource?path=', { method: 'POST', body: duplicate })).status).toBe(409);
+    expect((await fetch(base + '/resource?path=first.txt')).status).toBe(404);
+    expect((await post('/resource/move?from=new%2F&to=renamed%2F')).status).toBe(200);
+    const matches = await (await fetch(base + '/resource/search?' + new URLSearchParams({ query: 'ОТЧЁТ.txt' }))).json();
+    expect(matches).toEqual([{ path: 'renamed/', name: 'Отчёт.txt', type: 'FILE', size: 5 }]);
+    expect((await fetch(base + '/resource?' + new URLSearchParams({ path: 'renamed/' }), { method: 'DELETE' })).status).toBe(204);
+    expect((await fetch(base + '/directory?path=renamed%2F')).status).toBe(404);
+  });
 });

@@ -1,0 +1,55 @@
+import { expect, test } from '@playwright/test';
+import { fileURLToPath } from 'node:url';
+import { text, buffer } from 'node:stream/consumers';
+import { unzipSync } from 'fflate';
+
+test('real API: registration, directory upload, F5, actions, download and logout', async ({ page }) => {
+  await page.goto('/sign-up');
+  await page.getByLabel('Имя пользователя').fill('browser_test');
+  await page.getByLabel('Пароль', { exact: true }).fill('browser_password123');
+  await page.getByRole('button', { name: 'Зарегистрироваться' }).click();
+  await expect(page.getByRole('heading', { name: 'Папка пуста' })).toBeVisible();
+  await page.getByLabel('Загрузить папку', { exact: true }).setInputFiles(fileURLToPath(new URL('./fixtures/Документы', import.meta.url)));
+  await expect(page.getByRole('link', { name: 'Документы', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Документы', exact: true }).click();
+  await expect(page.getByText('Отчёт 2026.txt', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('Отчёт 2026.txt', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Переименовать' }).click();
+  await page.getByLabel('Имя ресурса').fill('Отчёт 100% #1?.txt');
+  await page.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(page.getByText('Отчёт 100% #1?.txt', { exact: true })).toBeVisible();
+  const fileDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Скачать', exact: true }).click();
+  const downloaded = await fileDownload;
+  // Windows cannot save '?' in a filename; Chromium sanitizes it after reading the header.
+  expect(downloaded.suggestedFilename()).toBe(process.platform === 'win32' ? 'Отчёт 100% #1_.txt' : 'Отчёт 100% #1?.txt');
+  expect(await text(await downloaded.createReadStream())).toContain('Содержимое тестового отчёта');
+  await page.getByRole('link', { name: 'Мои файлы', exact: true }).last().click();
+  const fullZip = page.waitForEvent('download');
+  await page.getByRole('row').filter({ has: page.getByRole('link', { name: 'Документы', exact: true }) })
+    .getByRole('button', { name: 'Скачать', exact: true }).click();
+  const zipEntries = unzipSync(await buffer(await (await fullZip).createReadStream()));
+  expect(Object.keys(zipEntries)).toEqual(['Отчёт 100% #1?.txt']);
+  expect(new TextDecoder().decode(zipEntries['Отчёт 100% #1?.txt'])).toContain('Содержимое тестового отчёта');
+  await page.getByRole('link', { name: 'Документы', exact: true }).click();
+  await page.getByRole('button', { name: 'Переместить', exact: true }).click();
+  await page.getByRole('button', { name: 'В корень', exact: true }).click();
+  await page.getByRole('button', { name: 'Переместить сюда' }).click();
+  await expect(page.getByRole('heading', { name: 'Папка пуста' })).toBeVisible();
+  await page.getByRole('link', { name: 'Мои файлы', exact: true }).last().click();
+  const folderRow = page.getByRole('row').filter({ has: page.getByRole('link', { name: 'Документы', exact: true }) });
+  const zipDownload = page.waitForEvent('download');
+  await folderRow.getByRole('button', { name: 'Скачать', exact: true }).click();
+  const archive = await zipDownload;
+  expect(archive.suggestedFilename()).toBe('Документы.zip');
+  expect(unzipSync(await buffer(await archive.createReadStream()))).toEqual({});
+  await page.getByLabel('Поиск по имени').fill('100%');
+  await expect(page).toHaveURL(/search\?query=100%25/);
+  await expect(page.getByText('Отчёт 100% #1?.txt', { exact: true })).toBeVisible();
+  await page.getByRole('row').filter({ hasText: 'Отчёт 100% #1?.txt' }).getByRole('button', { name: 'Удалить', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Удалить', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Ничего не найдено' })).toBeVisible();
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Вход в Облако' })).toBeVisible();
+});

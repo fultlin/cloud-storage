@@ -15,6 +15,7 @@
     "test:watch": "pnpm prisma:generate && vitest",
     "test:e2e": "pnpm prisma:generate && vitest run --config ./vitest.config.e2e.ts",
     "verify:large-http": "pnpm build && node scripts/verify-large-http.mjs",
+    "verify:frontend": "pnpm build && node scripts/verify-frontend.mjs",
     "dev": "pnpm prisma:generate && nest start --watch",
     "typecheck": "pnpm prisma:generate && tsc --noEmit",
     "prisma:generate": "prisma generate --config prisma.config.ts",

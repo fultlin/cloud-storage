@@ -43,5 +43,9 @@ export function createApiClient(options: ClientOptions) {
     initialUser: (signal?: AbortSignal) => request<User>('/api/user/me', 'GET', undefined, signal, true),
     listDirectory: (path: string, signal?: AbortSignal) => request<Resources>('/api/directory?' + new URLSearchParams({ path }), 'GET', undefined, signal),
     resource: (path: string, signal?: AbortSignal) => request<Resource>('/api/resource?' + new URLSearchParams({ path }), 'GET', undefined, signal),
+    search: (query: string, signal?: AbortSignal) => request<Resources>('/api/resource/search?' + new URLSearchParams({ query }), 'GET', undefined, signal),
+    createDirectory: (path: string) => request<Resource>('/api/directory?' + new URLSearchParams({ path }), 'POST'),
+    move: (from: string, to: string) => request<Resource>('/api/resource/move?' + new URLSearchParams({ from, to }), 'POST'),
+    remove: (path: string) => request<void>('/api/resource?' + new URLSearchParams({ path }), 'DELETE'),
   };
 }
