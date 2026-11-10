@@ -1,4 +1,4 @@
-FROM node:24.14.0-bookworm-slim AS base
+FROM node:24.14.1-bookworm-slim AS base
 WORKDIR /workspace
 
 FROM base AS manifests

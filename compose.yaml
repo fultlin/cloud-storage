@@ -39,7 +39,8 @@ services:
       - -dir=/data
       - -ip=seaweedfs
       - -ip.bind=0.0.0.0
-      - -volume.max=5
+      # Reserve slots for both the filer and the S3 bucket collections.
+      - -volume.max=16
       - -master.volumeSizeLimitMB=1024
       - -filer
       - -s3

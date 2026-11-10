@@ -318,7 +318,7 @@ HTML dialog с модальным фокусом. Альтернативы: Reac
 
 ## Сборка Docker-образа API
 
-Решение: одинаковый Node 24.14.0 на Debian в стадиях сборки и исполнения.
+Решение: одинаковый Node 24.14.1 на Debian в стадиях сборки и исполнения.
 Стадия `build` генерирует Prisma Client и компилирует `shared` и API. Отдельная
 стадия `production-dependencies` устанавливает только production-зависимости API
 и его workspace-пакетов из `pnpm-lock.yaml`. В `runtime` переносим каталоги
