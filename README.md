@@ -321,3 +321,35 @@ docker build -f apps/web/Dockerfile -t cloud-storage-web:local .
 в 300 секунд ограничивают паузу между операциями ввода-вывода, поэтому активная
 передача может длиться дольше. В полном Compose для API нужен `TRUST_PROXY=true`;
 `COOKIE_SECURE=true` включается только при работе через HTTPS.
+
+## Полный локальный Compose
+
+Из корня репозитория, с заполненным `.env`:
+
+```powershell
+docker compose -f compose.full.yaml up --build -d
+docker compose -f compose.full.yaml ps -a
+```
+
+Откройте [http://127.0.0.1:8080/](http://127.0.0.1:8080/). Порт можно изменить
+через `FULL_WEB_PORT`. Наружу опубликован только nginx; API обращается к базе,
+Redis и SeaweedFS по именам сервисов внутри сети Compose. Для локального HTTP
+API использует `TRUST_PROXY=true` и `COOKIE_SECURE=false`.
+
+Первый запуск готовит схему PostgreSQL и бакет `user-files` автоматически:
+`migrator` ждёт здоровый PostgreSQL, а `s3-init` ждёт S3 и создаёт бакет,
+если его нет. Оба контейнера должны завершиться с кодом 0. API стартует после
+них и Redis; nginx ждёт, пока API начнёт отвечать. Логи этапов:
+
+```powershell
+docker compose -f compose.full.yaml logs migrator s3-init api web
+```
+
+`FULL_DATABASE_URL` нужен, если пароль содержит спецсимволы URL: передайте URI
+с закодированным паролем и хостом `postgres`. По умолчанию URL формируется из
+`POSTGRES_USER`, `POSTGRES_PASSWORD` и `POSTGRES_DB`.
+
+У полного стека отдельный проект и volumes `cloud-storage-full_*`; существующие
+данные из `compose.yaml` не подключаются. `docker compose -f compose.full.yaml down`
+останавливает стек и сохраняет volumes. Этот файл предназначен для локального
+запуска и e2e, конфигурация VPS будет отдельной.
