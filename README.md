@@ -282,3 +282,21 @@ pnpm --filter @app/api verify:frontend
 Проверяются регистрация, загрузка папки с кириллицей, F5, переименование,
 перемещение, содержимое скачанного файла и ZIP, поиск, удаление и выход.
 Прогон через nginx и полный Compose остаётся частью этапа инфраструктуры.
+
+## Docker-образ API
+
+Собирайте из корня репозитория: API использует общий lockfile и пакет `@app/shared`.
+
+```powershell
+docker build -f apps/api/Dockerfile --target runtime -t cloud-storage-api:local .
+docker build -f apps/api/Dockerfile --target migrator -t cloud-storage-migrator:local .
+docker run --rm --entrypoint id cloud-storage-api:local -u
+```
+
+Последняя команда должна вернуть UID `1000`: API запускается от пользователя `node`.
+В `runtime` копируются только собранные пакеты и production-зависимости из
+зафиксированного lockfile. `migrator` запускает `prisma migrate deploy` отдельно.
+Перед запуском передайте переменные окружения; внутри сети Compose адреса базы,
+Redis и S3 должны указывать на имена сервисов. Корневой `.env` исключён из
+контекста сборки и в образ не копируется. Запуск обоих образов с зависимостями
+будет оформлен в полном Compose.

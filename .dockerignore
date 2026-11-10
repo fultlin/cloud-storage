@@ -1,0 +1,12 @@
+.git
+.agents
+.codex
+.aws
+**/node_modules
+**/dist
+**/.env*
+**/coverage
+**/test-results
+**/playwright-report
+**/*.tsbuildinfo
+apps/api/src/generated
