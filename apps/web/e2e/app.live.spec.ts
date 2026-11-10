@@ -1,20 +1,34 @@
 import { expect, test } from '@playwright/test';
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { text, buffer } from 'node:stream/consumers';
 import { unzipSync } from 'fflate';
 
-test('real API: registration, directory upload, F5, actions, download and logout', async ({ page }) => {
-  await page.goto('/sign-up');
-  await page.getByLabel('Имя пользователя').fill('browser_test');
+test('real API: registration, directory upload, F5, actions, download and logout', async ({ page, context }, info) => {
+  const fullStack = info.project.name === 'compose';
+  const landing = await page.goto('/sign-up');
+  if (fullStack) {
+    expect(landing?.status()).toBe(200);
+    expect(landing?.headers().server).toMatch(/^nginx(?:\/|$)/);
+    expect(await landing?.text()).not.toContain('/@vite/client');
+  }
+  await page.getByLabel('Имя пользователя').fill(`browser_${randomBytes(6).toString('hex')}`);
   await page.getByLabel('Пароль', { exact: true }).fill('browser_password123');
   await page.getByRole('button', { name: 'Зарегистрироваться' }).click();
   await expect(page.getByRole('heading', { name: 'Папка пуста' })).toBeVisible();
+  if (fullStack) {
+    expect((await context.cookies()).find(cookie => cookie.name === 'sid')).toMatchObject({
+      httpOnly: true, sameSite: 'Lax', secure: false, path: '/',
+    });
+  }
   await page.getByLabel('Загрузить папку', { exact: true }).setInputFiles(fileURLToPath(new URL('./fixtures/Документы', import.meta.url)));
   await expect(page.getByRole('link', { name: 'Документы', exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'Документы', exact: true }).click();
+  await expect.poll(() => decodeURIComponent(new URL(page.url()).pathname)).toBe('/files/Документы/');
   await expect(page.getByText('Отчёт 2026.txt', { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByText('Отчёт 2026.txt', { exact: true })).toBeVisible();
+  await expect.poll(() => decodeURIComponent(new URL(page.url()).pathname)).toBe('/files/Документы/');
   await page.getByRole('button', { name: 'Переименовать' }).click();
   await page.getByLabel('Имя ресурса').fill('Отчёт 100% #1?.txt');
   await page.getByRole('button', { name: 'Сохранить' }).click();
@@ -52,4 +66,5 @@ test('real API: registration, directory upload, F5, actions, download and logout
   await expect(page.getByRole('heading', { name: 'Ничего не найдено' })).toBeVisible();
   await page.getByRole('button', { name: 'Выйти', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Вход в Облако' })).toBeVisible();
+  if (fullStack) expect((await context.cookies()).some(cookie => cookie.name === 'sid')).toBe(false);
 });
