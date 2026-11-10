@@ -9,7 +9,7 @@ if (origin.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes
 
 export default defineConfig({
   ...base,
-  testMatch: '**/*.live.spec.ts',
+  testMatch: process.env.FULL_STACK_LARGE_UPLOAD === 'true' ? '**/*.large.spec.ts' : '**/*.live.spec.ts',
   projects: [{ name: 'compose' }],
   webServer: undefined,
   use: { ...base.use, baseURL: origin.origin },
