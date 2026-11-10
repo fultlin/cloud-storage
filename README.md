@@ -365,3 +365,41 @@ docker compose -f compose.full.yaml logs migrator s3-init api web
 данные из `compose.yaml` не подключаются. `docker compose -f compose.full.yaml down`
 останавливает стек и сохраняет volumes. Этот файл предназначен для локального
 запуска и e2e, конфигурация VPS будет отдельной.
+
+## Деплой на VPS
+
+Для Linux с Docker Engine и Compose v2 используйте `compose.prod.yaml`. На VPS
+работают nginx, API, PostgreSQL и Redis. Файлы хранятся во внешнем S3, а схема
+БД обновляется отдельным запуском мигратора перед запуском новой версии API.
+
+1. Загрузите нужную ревизию репозитория. На VPS скопируйте
+   `.env.production.example` в `.env.production` и ограничьте доступ к файлу
+   командой `chmod 600 .env.production`.
+2. Задайте отдельные пароль PostgreSQL и `SESSION_SECRET` (например, отдельный
+   `openssl rand -hex 32` для каждого). В `DATABASE_URL` используйте хост
+   `postgres` и тот же пароль, закодированный для URL при необходимости.
+3. У провайдера создайте приватный бакет `user-files`. Впишите HTTPS endpoint,
+   регион, ключи и нужное провайдеру значение `S3_FORCE_PATH_STYLE`. Ключу
+   нужны права на проверку бакета, листинг и операции с объектами, включая
+   multipart upload. При старте API проверит доступность бакета.
+
+```bash
+docker compose --env-file .env.production -f compose.prod.yaml --profile deploy build api web migrator &&
+docker compose --env-file .env.production -f compose.prod.yaml up -d --wait postgres redis &&
+docker compose --env-file .env.production -f compose.prod.yaml run --rm migrator &&
+docker compose --env-file .env.production -f compose.prod.yaml up -d --wait api web
+```
+
+По умолчанию nginx доступен только на `127.0.0.1:80` VPS. Для проверки по HTTP
+используйте SSH-туннель, например `ssh -L 8080:127.0.0.1:80 user@server`, и
+откройте локальный порт 8080. Для временной публичной HTTP-демонстрации
+можно указать `WEB_BIND_ADDRESS=0.0.0.0`. PostgreSQL, Redis и API не публикуют
+порты. Для публичного использования с реальными учётными данными настройте
+HTTPS и включите `COOKIE_SECURE` в конфигурации API после настройки TLS.
+
+После запуска проверьте `ps` и `logs api web`, открытие вложенного URL после F5,
+регистрацию и вход, флаги cookie, загрузку и скачивание. Без сессии запрос
+`GET /api/user/me` должен вернуть 401 через nginx. Swagger в production отключён.
+Перед обновлением сохраняйте резервную копию БД и сохраняйте volumes. При сбое
+миграции исправьте причину до запуска нового API. Откат кода возможен только
+при совместимости предыдущей версии API с уже применённой схемой.
