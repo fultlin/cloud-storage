@@ -287,6 +287,7 @@ pnpm --filter @app/api verify:frontend
 ```powershell
 docker compose -f compose.full.yaml up --build -d
 pnpm --filter @app/web test:full
+pnpm --filter @app/api verify:large-nginx
 ```
 
 Режим `test:full` подключается к `http://127.0.0.1:8080` и не запускает Vite.
@@ -294,6 +295,13 @@ pnpm --filter @app/web test:full
 в `FULL_STACK_BASE_URL`. Тест проверяет раздачу страницы nginx, флаги сессионной
 cookie и её удаление после выхода. Каждый прогон создаёт нового тестового
 пользователя; запускайте его на локальном тестовом стеке.
+
+`verify:large-nginx` генерирует 1 ГиБ порциями, передаёт его через nginx,
+скачивает результат и сверяет размер и SHA-256. На стороне клиента не нужен
+файл на диске. В конце скрипт пытается удалить тестовый файл и завершить сессию.
+Тестовая учётная запись остаётся в БД. Обе команды поддерживают
+`FULL_STACK_BASE_URL`. Этот тест проверяет транспорт; прогресс загрузки в браузере
+проверяется отдельно. Состояние приёмки — в [INFRA-REVIEW.md](INFRA-REVIEW.md).
 
 ## Docker-образ API
 
