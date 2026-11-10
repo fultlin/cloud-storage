@@ -1,7 +1,7 @@
 FROM node:24.14.1-bookworm-slim AS build
 WORKDIR /workspace
 RUN npm install --global pnpm@11.25.0
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.mjs tsconfig.base.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared/package.json packages/shared/package.json

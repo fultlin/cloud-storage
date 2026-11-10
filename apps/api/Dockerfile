@@ -6,7 +6,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/* \
     && npm install --global pnpm@11.25.0
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.mjs ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY packages/shared/package.json packages/shared/package.json
@@ -15,7 +15,8 @@ FROM manifests AS dependencies
 RUN pnpm install --frozen-lockfile
 
 FROM manifests AS production-dependencies
-RUN pnpm --filter @app/api... install --prod --frozen-lockfile
+RUN pnpm --filter @app/api... install --prod --frozen-lockfile \
+    && node --input-type=module -e 'import { readdirSync } from "node:fs"; const tools = readdirSync("node_modules/.pnpm").filter(name => /^(prisma|typescript)@/.test(name)); if (tools.length) throw new Error("Unexpected runtime tools: " + tools.join(", "));'
 
 # Мигратор использует Prisma CLI, схему и историю миграций, но не запускает API.
 FROM dependencies AS migrator

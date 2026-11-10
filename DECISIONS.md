@@ -326,6 +326,12 @@ HTML dialog с модальным фокусом. Альтернативы: Reac
 Приложение и мигратор запускаются от `node`. Prisma CLI и миграции доступны
 в отдельной цели `migrator`; старт API не изменяет схему базы.
 
+Хук `.pnpmfile.mjs` убирает опциональные peer-связи Prisma Client с Prisma CLI
+и TypeScript, а также связь Swagger с TypeScript для проверенных версий пакетов.
+Прямые зависимости для сборки и миграций остаются в lockfile. Стадия
+`production-dependencies` проверяет, что CLI и компилятор отсутствуют в её
+виртуальном store pnpm.
+
 Альтернатива: `pnpm deploy --legacy --offline`. Пробная сборка на pnpm 11.25.0
 остановилась с `ERR_PNPM_NO_OFFLINE_META` для `pg-cloudflare`. Установка по
 зафиксированному lockfile не требует повторно подбирать версии для deployment.
